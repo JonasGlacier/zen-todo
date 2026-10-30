@@ -9,6 +9,8 @@ struct Todo {
     title: String,
     completed: bool,
     created_at: i64,
+    #[serde(default)]
+    prerequisite_ids: Vec<String>,
 }
 
 fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {

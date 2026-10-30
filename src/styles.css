@@ -46,3 +46,46 @@ button { border: 0; cursor: pointer; }
 .error { display: grid; min-height: 100vh; place-content: center; text-align: center; }
 .error p { color: #9b998f; font-size: 12px; }
 @media (max-width: 380px) { .shell { padding-right: 10px; padding-left: 10px; } }
+
+/* The list stays compact, while each task can reveal its dependency controls. */
+.shell { padding: 8px 14px 11px; }
+.controls { min-height: 38px; margin-bottom: 10px; }
+.brand { display: flex; align-items: center; gap: 8px; color: #485b45; font-size: 10px; font-weight: 700; letter-spacing: .12em; }
+.brand-mark { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 9px; background: #e3e9df; color: #70836a; font-size: 18px; }
+.brand small { display: block; margin-top: 2px; color: #a09f94; font-size: 9px; font-weight: 400; letter-spacing: 0; }
+.add-form { height: 40px; }
+.list-heading { display: flex; justify-content: space-between; align-items: center; margin: 15px 2px 3px; color: #66675d; font-size: 11px; font-weight: 600; }
+.list-heading span:last-child { color: #aaa99f; font-size: 10px; font-weight: 400; }
+.list { gap: 7px; margin-top: 6px; }
+.todo { display: block; min-height: 0; padding: 0; overflow: hidden; }
+.todo-row { display: flex; min-height: 51px; align-items: center; gap: 9px; padding: 8px 9px; }
+.todo-content { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.todo-title { display: block; flex: none; }
+.todo-meta { color: #a5aa9e; font-size: 9px; }
+.is-blocked .todo-row { background: #f2f1eb; }
+.is-blocked .todo-title { color: #a09f96; }
+.is-blocked .todo-meta { color: #aaa99f; }
+.check:disabled { cursor: not-allowed; border-color: #d8d7d0; background: #eae9e2; }
+.details-button { width: 24px; height: 25px; flex: 0 0 auto; border-radius: 6px; color: #8e9988; background: #f0f3ed; font-size: 15px; }
+.details-button:hover, .is-expanded .details-button { color: #536c4e; background: #e2eade; }
+.delete { width: 20px; flex: 0 0 auto; padding: 0; }
+.todo:focus-within .delete { opacity: 1; }
+.dependencies { padding: 2px 10px 10px 36px; border-top: 1px solid #efeee8; cursor: default; }
+.dependency-section { padding-top: 10px; }
+.dependency-heading { display: flex; justify-content: space-between; color: #626c5d; font-size: 10px; font-weight: 700; }
+.dependency-heading span:last-child { color: #aaa99f; font-size: 9px; font-weight: 400; }
+.dependency-items { display: flex; flex-direction: column; gap: 4px; margin: 7px 0; }
+.dependency-item { display: flex; align-items: center; gap: 6px; color: #74756c; font-size: 11px; }
+.dependency-item span:nth-child(2) { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
+.dependency-dot { width: 7px; height: 7px; flex: 0 0 auto; border: 1px solid #b6b8ae; border-radius: 50%; }
+.dependency-dot.done { border-color: #82967b; background: #82967b; }
+.dependency-item button { padding: 0 3px; color: #aaa99f; background: transparent; font-size: 15px; }
+.dependency-item button:hover { color: #bb7264; }
+.dependency-empty { color: #b5b4ab; font-size: 10px; }
+.dependency-select, .dependency-form { width: 100%; height: 28px; border: 1px solid #eae9e1; border-radius: 6px; background: #fafaf6; color: #808b7b; font-size: 10px; }
+.dependency-select { padding: 0 6px; cursor: pointer; }
+.dependency-form { display: flex; margin-top: 5px; }
+.dependency-form input { min-width: 0; flex: 1; padding: 0 7px; border: 0; outline: 0; background: transparent; color: #47463f; font-size: 10px; }
+.dependency-form input::placeholder { color: #b5b4ab; }
+.dependency-form button { padding: 0 8px; color: #70836a; background: transparent; font-size: 10px; }
+.dependency-form:focus-within, .dependency-select:focus { outline: 1px solid #a8bba1; }

@@ -1,16 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
+import { canLink, isBlocked, reconcile, removeTodos, type Todo } from "./dependencies";
 import "./styles.css";
-
-type Todo = {
-  id: string;
-  title: string;
-  completed: boolean;
-  createdAt: number;
-};
 
 const app = document.querySelector<HTMLElement>("#app")!;
 let todos: Todo[] = [];
 let pinned = true;
+let expandedId: string | null = null;
+let saveQueue = Promise.resolve();
 let taskDrag: {
   id: string;
   source: HTMLElement;
@@ -32,18 +28,21 @@ const escapeHtml = (value: string) =>
   })[character] ?? character);
 
 async function persist() {
-  await invoke("save_todos", { todos });
+  const snapshot = structuredClone(todos);
+  saveQueue = saveQueue.catch(() => {}).then(() => invoke("save_todos", { todos: snapshot }));
+  await saveQueue;
 }
 
 function render() {
   const active = todos.filter((todo) => !todo.completed).length;
   const completed = todos.filter((todo) => todo.completed).length;
+  const scrollTop = document.querySelector<HTMLElement>("#todo-list")?.scrollTop ?? 0;
 
   app.innerHTML = `
     <section class="shell">
       <div class="window-drag-region" aria-label="拖动窗口"></div>
       <header class="controls">
-        <span class="status">${active === 0 ? "已清空" : `${active} 项待完成`}</span>
+        <div class="brand"><span class="brand-mark">✳</span><span>ZEN TODO<small>把事情，一步步完成</small></span></div>
         <div class="window-actions">
           <button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="置顶窗口">⌃</button>
           <button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button>
@@ -56,6 +55,7 @@ function render() {
         <button type="submit">添加</button>
       </form>
 
+      <div class="list-heading"><span>我的待办</span><span>${active} 项进行中</span></div>
       <div class="list" id="todo-list">
         ${todos.length === 0 ? `<div class="empty"><span>✦</span><strong>还没有任务</strong><p>把脑中的事情放下来，专注当下。</p></div>` : todos.map(todoTemplate).join("")}
       </div>
@@ -76,7 +76,13 @@ function render() {
     void invoke("start_dragging");
   });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => handleTodoAction(button.dataset.action!, button.dataset.id!));
+    button.addEventListener("click", () => handleTodoAction(button.dataset.action!, button.dataset.id!, button.dataset.relatedId));
+  });
+  document.querySelectorAll<HTMLFormElement>(".dependency-form").forEach((form) => {
+    form.addEventListener("submit", addDependency);
+  });
+  document.querySelectorAll<HTMLSelectElement>(".dependency-select").forEach((select) => {
+    select.addEventListener("change", () => linkExisting(select));
   });
   document.querySelectorAll<HTMLElement>(".todo").forEach((todo) => {
     todo.addEventListener("pointerdown", startTodoDrag);
@@ -84,18 +90,41 @@ function render() {
     todo.addEventListener("pointerup", endTodoDrag);
     todo.addEventListener("pointercancel", cancelTodoDrag);
   });
+  document.querySelector<HTMLElement>("#todo-list")!.scrollTop = scrollTop;
 }
 
 function todoTemplate(todo: Todo) {
-  return `<article class="todo ${todo.completed ? "is-completed" : ""}" data-id="${todo.id}">
-    <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}" aria-label="${todo.completed ? "标记未完成" : "标记完成"}">${todo.completed ? "✓" : ""}</button>
-    <span class="todo-title">${escapeHtml(todo.title)}</span>
-    <button class="delete" data-action="delete" data-id="${todo.id}" aria-label="删除任务">×</button>
+  const prerequisites = todos.filter((item) => todo.prerequisiteIds.includes(item.id));
+  const next = todos.filter((item) => item.prerequisiteIds.includes(todo.id));
+  const blocked = isBlocked(todo, todos);
+  const expanded = expandedId === todo.id;
+  const waiting = prerequisites.filter((item) => !item.completed);
+  return `<article class="todo ${todo.completed ? "is-completed" : ""} ${blocked ? "is-blocked" : ""} ${expanded ? "is-expanded" : ""}" data-id="${escapeHtml(todo.id)}">
+    <div class="todo-row">
+      <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${escapeHtml(todo.id)}" ${blocked ? "disabled" : ""} aria-label="${blocked ? "请先完成前置任务" : todo.completed ? "标记未完成" : "标记完成"}">${todo.completed ? "✓" : ""}</button>
+      <div class="todo-content"><span class="todo-title">${escapeHtml(todo.title)}</span>
+        <span class="todo-meta">${blocked ? `◌ 等待 ${waiting.length} 个前置任务` : todo.completed ? "已完成" : "可以开始"}${next.length ? ` · ${next.length} 个后续` : ""}</span></div>
+      <button class="details-button" data-action="expand" data-id="${escapeHtml(todo.id)}" aria-label="${expanded ? "收起" : "管理"}任务步骤" aria-expanded="${expanded}">${expanded ? "⌃" : "⌄"}</button>
+      <button class="delete" data-action="delete" data-id="${escapeHtml(todo.id)}" aria-label="删除任务">×</button>
+    </div>
+    ${expanded ? `<div class="dependencies">${dependencySection(todo, prerequisites, "before")}${dependencySection(todo, next, "after")}</div>` : ""}
   </article>`;
 }
 
+function dependencySection(todo: Todo, related: Todo[], direction: "before" | "after") {
+  const before = direction === "before";
+  const candidates = todos.filter((item) => before ? canLink(item.id, todo.id, todos) : canLink(todo.id, item.id, todos));
+  const id = escapeHtml(todo.id);
+  return `<section class="dependency-section">
+    <div class="dependency-heading"><span>${before ? "上一步" : "下一步"}</span><span>${before ? "全部完成后解锁" : "完成后解锁"}</span></div>
+    <div class="dependency-items">${related.length ? related.map((item) => `<div class="dependency-item"><span class="dependency-dot ${item.completed ? "done" : ""}"></span><span title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span><button data-action="unlink-${direction}" data-id="${id}" data-related-id="${escapeHtml(item.id)}" aria-label="移除与 ${escapeHtml(item.title)} 的关联">×</button></div>`).join("") : `<span class="dependency-empty">${before ? "没有前置任务" : "没有后续任务"}</span>`}</div>
+    <select class="dependency-select" data-id="${id}" data-direction="${direction}" aria-label="关联已有${before ? "上一步" : "下一步"}"><option value="">＋ 关联已有任务</option>${candidates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)}</option>`).join("")}</select>
+    <form class="dependency-form" data-id="${id}" data-direction="${direction}"><input aria-label="新建${before ? "上一步" : "下一步"}" placeholder="新建${before ? "上一步" : "下一步"}…" maxlength="200"><button type="submit">添加</button></form>
+  </section>`;
+}
+
 function startTodoDrag(event: PointerEvent) {
-  if (event.button !== 0 || (event.target as Element).closest("button")) return;
+  if (event.button !== 0 || (event.target as Element).closest("button, input, select, .dependencies")) return;
   const todo = event.currentTarget as HTMLElement;
   taskDrag = {
     id: todo.dataset.id!,
@@ -174,25 +203,71 @@ async function addTodo(event: SubmitEvent) {
   const input = document.querySelector<HTMLInputElement>("#todo-input")!;
   const title = input.value.trim();
   if (!title) return;
-  todos.unshift({ id: crypto.randomUUID(), title, completed: false, createdAt: Date.now() });
+  todos.unshift({ id: crypto.randomUUID(), title, completed: false, createdAt: Date.now(), prerequisiteIds: [] });
   await persist();
   render();
   document.querySelector<HTMLInputElement>("#todo-input")?.focus();
 }
 
-async function handleTodoAction(action: string, id: string) {
-  if (action === "toggle") {
-    const todo = todos.find((item) => item.id === id);
-    if (todo) todo.completed = !todo.completed;
-  } else if (action === "delete") {
-    todos = todos.filter((item) => item.id !== id);
+async function handleTodoAction(action: string, id: string, relatedId?: string) {
+  const todo = todos.find((item) => item.id === id);
+  if (!todo) return;
+  if (action === "expand") {
+    expandedId = expandedId === id ? null : id;
+    render();
+    return;
   }
+  if (action === "toggle") {
+    if (!todo.completed && isBlocked(todo, todos)) return;
+    todo.completed = !todo.completed;
+    reconcile(todos);
+  } else if (action === "delete") {
+    todos = removeTodos(todos, new Set([id]));
+    if (expandedId === id) expandedId = null;
+  } else if (action === "unlink-before" && relatedId) {
+    todo.prerequisiteIds = todo.prerequisiteIds.filter((item) => item !== relatedId);
+  } else if (action === "unlink-after" && relatedId) {
+    const next = todos.find((item) => item.id === relatedId);
+    if (next) next.prerequisiteIds = next.prerequisiteIds.filter((item) => item !== id);
+  } else return;
   await persist();
   render();
 }
 
+async function linkExisting(select: HTMLSelectElement) {
+  const id = select.dataset.id!;
+  const relatedId = select.value;
+  const before = select.dataset.direction === "before";
+  const prerequisiteId = before ? relatedId : id;
+  const dependentId = before ? id : relatedId;
+  if (!canLink(prerequisiteId, dependentId, todos)) return;
+  todos.find((todo) => todo.id === dependentId)!.prerequisiteIds.push(prerequisiteId);
+  reconcile(todos);
+  await persist();
+  render();
+}
+
+async function addDependency(event: SubmitEvent) {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const input = form.querySelector<HTMLInputElement>("input")!;
+  const title = input.value.trim();
+  const parent = todos.find((todo) => todo.id === form.dataset.id);
+  if (!title || !parent) return;
+  const before = form.dataset.direction === "before";
+  const newTodo: Todo = { id: crypto.randomUUID(), title, completed: false, createdAt: Date.now(), prerequisiteIds: before ? [] : [parent.id] };
+  if (before) parent.prerequisiteIds.push(newTodo.id);
+  const index = todos.indexOf(parent);
+  todos.splice(before ? index : index + 1, 0, newTodo);
+  reconcile(todos);
+  await persist();
+  render();
+  document.querySelector<HTMLInputElement>(`.dependency-form[data-direction="${before ? "before" : "after"}"] input`)?.focus();
+}
+
 async function clearCompleted() {
-  todos = todos.filter((todo) => !todo.completed);
+  todos = removeTodos(todos, new Set(todos.filter((todo) => todo.completed).map((todo) => todo.id)));
+  if (!todos.some((todo) => todo.id === expandedId)) expandedId = null;
   await persist();
   render();
 }
@@ -204,7 +279,8 @@ async function togglePin() {
 }
 
 async function start() {
-  todos = await invoke<Todo[]>("load_todos");
+  todos = (await invoke<Todo[]>("load_todos")).map((todo) => ({ ...todo, prerequisiteIds: todo.prerequisiteIds ?? [] }));
+  reconcile(todos);
   render();
 }
 
