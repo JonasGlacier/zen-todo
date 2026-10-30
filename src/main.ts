@@ -1,8 +1,11 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
 import type { Board, Group, Todo, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
+import { captureEditors, restoreEditors } from "./session";
+import type { Composer, UiSession } from "./session";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -12,10 +15,13 @@ let board: Board = workspace.lists[0].board;
 let pinned = true;
 let pendingChange = Promise.resolve();
 let message = "";
-let composer: { groupId: string; mode: "task" | "previous" | "next" } | null = null;
+let composer: Composer | null = null;
 let draggedId: string | null = null;
 let settingsWindow: Window | null = null;
 let openingSettings = false;
+let suspending = false;
+let initialized = false;
+let saveFailures = 0;
 
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -51,6 +57,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
       if (reset) message = t("resetTasks", { count: reset });
       await persist();
     } catch (error) {
+      saveFailures++;
       workspace = previous;
       board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
       message = t("saveFailed");
@@ -121,8 +128,8 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
         </div>
       </header>
       <div class="group-content" id="content-${group.id}" ${collapsed ? "hidden" : ""}>
-        <div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
-        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">${icon("plus")} ${t("firstTodo")}</button>`}
+        ${collapsed ? "" : `<div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
+        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">${icon("plus")} ${t("firstTodo")}</button>`}`}
       </div>
     </div>
   </section>`;
@@ -194,25 +201,64 @@ function refreshLanguage() {
   const operation = pendingChange.then(() => {
     // Another window can change language while an editor still has focus.
     // Preserve editor values and the caret across the interface refresh.
-    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("#step-input, #list-name, [data-rename], [data-edit-todo]")).map((input) => ({
-      selector: input.id ? `#${input.id}` : input.dataset.rename ? `[data-rename="${input.dataset.rename}"]` : `[data-edit-todo="${input.dataset.editTodo}"]`,
-      value: input.value, focused: document.activeElement === input,
-      start: input.selectionStart, end: input.selectionEnd,
-    }));
+    const fields = captureEditors();
     message = "";
     render();
-    for (const field of fields) {
-      const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(field.selector);
-      if (!input) continue;
-      input.value = field.value;
-      if (input instanceof HTMLTextAreaElement) resizeTodo(input);
-      if (field.focused) {
-        input.focus({ preventScroll: true });
-        input.setSelectionRange(field.start, field.end);
-      }
-    }
+    restoreEditors(fields, resizeTodo);
   });
   pendingChange = operation.catch(console.error);
+}
+
+function restoreSession(session: UiSession | null) {
+  if (session?.version !== 1) return;
+  pinned = session.pinned;
+  if (session.listId !== workspace.activeListId) return;
+  const target = board.groups.find((group) => group.id === session.composer?.groupId);
+  composer = target && !target.collapsed ? session.composer : null;
+}
+
+function restoreSessionEditors(session: UiSession | null) {
+  if (session?.version !== 1 || session.listId !== workspace.activeListId) return;
+  restoreEditors(session.editors, resizeTodo);
+  document.querySelector(".list")!.scrollTop = session.scrollTop;
+}
+
+async function suspendToTray() {
+  if (!isTauri() || suspending) return;
+  suspending = true;
+  const failures = saveFailures;
+  const form = document.querySelector<HTMLElement>(".inline-form");
+  const mode = form?.dataset.mode;
+  const renderedComposer: Composer | null = form?.dataset.group && (mode === "task" || mode === "previous" || mode === "next")
+    ? { groupId: form.dataset.group, mode } : null;
+  const session: UiSession | null = initialized ? {
+    version: 1, listId: document.querySelector<HTMLElement>(".tab.is-selected")?.dataset.list ?? workspace.activeListId, pinned,
+    scrollTop: document.querySelector(".list")?.scrollTop ?? 0,
+    composer: renderedComposer, editors: captureEditors(),
+  } : null;
+  // Capture before blur: it commits existing edits but leaves new-task drafts
+  // in the session. Never tear down a WebView while a save is still pending.
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+  app.inert = true;
+  try {
+    await pendingChange;
+    if (saveFailures !== failures) throw new Error("Pending save failed");
+    if (session) session.pinned = pinned;
+    if (initialized) await persist();
+    await invoke("hide_window", { session });
+  } catch (error) {
+    suspending = false;
+    app.inert = false;
+    if (initialized) {
+      restoreSession(session);
+      render();
+      restoreSessionEditors(session);
+    }
+    message = t("hideFailed");
+    const notice = document.querySelector<HTMLElement>(".notice");
+    if (notice) { notice.textContent = message; notice.classList.add("visible"); }
+    console.error(error);
+  }
 }
 
 function openComposer(groupId: string, mode: "task" | "previous" | "next") {
@@ -431,15 +477,18 @@ function bindEvents() {
       if (composer && board.groups.find((group) => group.id === composer!.groupId)?.collapsed) composer = null;
     }, "organize-button");
   });
-  document.querySelector("#pin-button")!.addEventListener("click", async () => {
-    try {
-      if (isTauri()) await invoke("set_always_on_top", { value: !pinned });
-      pinned = !pinned;
-      render();
-    } catch { message = t("pinFailed"); render(); }
+  document.querySelector("#pin-button")!.addEventListener("click", () => {
+    const operation = pendingChange.then(async () => {
+      try {
+        if (isTauri()) await invoke("set_always_on_top", { value: !pinned });
+        pinned = !pinned;
+        render();
+      } catch { message = t("pinFailed"); render(); }
+    });
+    pendingChange = operation.catch(console.error);
   });
   document.querySelector("#hide-button")!.addEventListener("click", () => {
-    if (isTauri()) void invoke("hide_window").catch(() => { message = t("hideFailed"); render(); });
+    void suspendToTray();
   });
   document.querySelectorAll<HTMLElement>("[data-window-drag]").forEach((region) => {
     region.addEventListener("pointerdown", (event) => {
@@ -481,26 +530,36 @@ function bindEvents() {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.isComposing) return;
+  if (event.isComposing || suspending) return;
   if (event.key === "Escape") { composer = null; render(); }
 });
 
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
 
 async function start() {
+  if (isTauri()) {
+    const stopHideListener = await listen("tray-hide-requested", () => { void suspendToTray(); });
+    window.addEventListener("pagehide", stopHideListener, { once: true });
+  }
   const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
+  const session = isTauri() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
   if (!workspace.lists.length || !workspace.lists.some((list) => list.id === workspace.activeListId)) throw new Error("Invalid workspace");
   for (const list of workspace.lists) reconcile(list.board);
   board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
+  restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);
   window.addEventListener("pagehide", dispose, { once: true });
   if (isTauri()) await invoke("set_language", { language: getLanguage() }).catch(() => { message = t("settingsFailed"); });
   render();
+  restoreSessionEditors(session);
+  initialized = true;
+  if (isTauri()) await invoke("main_ready");
 }
 
 start().catch((error) => {
   console.error(error);
   document.documentElement.lang = getLanguage();
   app.innerHTML = `<section class="shell error"><strong>${t("loadFailed")}</strong><p>${t("loadFailedHint")}</p></section>`;
+  if (isTauri()) void invoke("main_ready").catch(console.error);
 });
