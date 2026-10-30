@@ -11,14 +11,18 @@ let failed = false;
 let vault: { encrypted: boolean; locked: boolean; lockOnHide: boolean; legacyTemp: boolean } | null = null;
 let vaultError = "";
 let vaultLoadFailed = false;
+let changingPassword = false;
+let passwordChanged = false;
 let category: "general" | "privacy" = "general";
 document.body.classList.add("settings-window");
 
 function render() {
   const focused = document.activeElement?.id;
+  const scrollTop = document.querySelector<HTMLElement>(".settings-main")?.scrollTop ?? 0;
   document.documentElement.lang = getLanguage();
   document.title = `${t("settings")} · Zen Todo`;
   app.innerHTML = `<div class="settings-layout">
+    <div class="settings-drag" aria-label="${t("dragWindow")}" title="${t("dragWindow")}"></div>
     <aside class="settings-sidebar">
       <div class="settings-brand">${icon("settings")}<span>Zen Todo</span></div>
       <nav aria-label="${t("settingsNavigation")}">${(["general", "privacy"] as const).map((item) => `<button class="settings-category ${category === item ? "is-selected" : ""}" data-category="${item}" ${category === item ? 'aria-current="page"' : ""}>${icon(item)}<span>${t(item)}</span></button>`).join("")}</nav>
@@ -31,10 +35,16 @@ function render() {
           <p class="setting-description">${t("languageDescription")}</p><p class="setting-hint">${t("languageHint")}</p></div>
       </section><p class="settings-error" role="status">${failed ? t("settingsFailed") : ""}</p>` : `<section class="settings-section" aria-labelledby="privacy-title"><h2 id="privacy-title">${t("privacy")}</h2><p class="section-description">${t("privacyDescription")}</p>
         ${isTauri() && vault ? `<div class="settings-card"><div class="setting-label">${icon("privacy")}<span>${t("encryption")}</span></div><p class="setting-description">${t("encryptionDescription")}</p>
-          ${vault.encrypted ? `<p class="encryption-status">${icon("check")}${t("encryptionEnabled")}</p><label class="setting-checkbox"><input id="lock-on-hide" type="checkbox" ${vault.lockOnHide ? "checked" : ""} ${saving ? "disabled" : ""}/><span>${t("lockOnHide")}</span></label><p class="setting-hint">${t("lockOnHideHint")}</p>` : `<form id="encryption-form" class="encryption-form"><label>${t("password")}<input type="password" id="password" autocomplete="new-password" required /></label><label>${t("confirmPassword")}<input type="password" id="confirm-password" autocomplete="new-password" required /></label><button type="submit" ${saving ? "disabled" : ""}>${t("enableEncryption")}</button></form>`}
+          ${vault.encrypted ? `<p class="encryption-status">${icon("check")}${t("encryptionEnabled")}</p><label class="setting-checkbox"><input id="lock-on-hide" type="checkbox" ${vault.lockOnHide ? "checked" : ""} ${saving ? "disabled" : ""}/><span>${t("lockOnHide")}</span></label><p class="setting-hint">${t("lockOnHideHint")}</p>
+          ${changingPassword ? `<form id="change-password-form" class="encryption-form"><label>${t("currentPassword")}<input id="current-password" type="password" autocomplete="current-password" required /></label><label>${t("newPassword")}<input id="new-password" type="password" autocomplete="new-password" required /></label><label>${t("confirmNewPassword")}<input id="confirm-new-password" type="password" autocomplete="new-password" required /></label><div class="password-actions"><button type="submit">${t("changePassword")}</button><button type="button" id="cancel-password" class="secondary-button">${t("cancel")}</button></div><p id="password-error" class="settings-error" role="alert"></p></form>` : `<button id="change-password" class="settings-action">${t("changePassword")}</button>${passwordChanged ? `<p class="settings-success" role="status">${t("passwordChanged")}</p>` : ""}`}` : `<form id="encryption-form" class="encryption-form"><label>${t("password")}<input type="password" id="password" autocomplete="new-password" required /></label><label>${t("confirmPassword")}<input type="password" id="confirm-password" autocomplete="new-password" required /></label><button type="submit" ${saving ? "disabled" : ""}>${t("enableEncryption")}</button></form>`}
           ${vault.legacyTemp ? `<p class="settings-error">${t("legacyTempWarning")}</p>` : ""}<p class="settings-error" role="status">${vaultError}</p></div>` : `<div class="settings-card"><p class="setting-description setting-message">${!isTauri() ? t("privacyDesktopOnly") : vaultLoadFailed ? t("privacyLoadFailed") : t("privacyLoading")}</p></div>`}</section>`}
     </section>
   </div>`;
+  document.querySelector<HTMLElement>(".settings-drag")!.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || !isTauri()) return;
+    event.preventDefault();
+    void invoke("start_dragging").catch(console.error);
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach((button) => button.addEventListener("click", () => {
     if (saving) return;
     category = button.dataset.category === "privacy" ? "privacy" : "general";
@@ -56,7 +66,45 @@ function render() {
   document.querySelector<HTMLInputElement>("#lock-on-hide")?.addEventListener("change", (event) => {
     void updateVault("set_lock_on_hide", { value: (event.target as HTMLInputElement).checked });
   });
+  document.querySelector("#change-password")?.addEventListener("click", () => { changingPassword = true; passwordChanged = false; render(); document.querySelector<HTMLInputElement>("#current-password")?.focus(); });
+  document.querySelector("#cancel-password")?.addEventListener("click", () => { if (!saving) { changingPassword = false; render(); document.querySelector<HTMLElement>("#change-password")?.focus(); } });
+  document.querySelector<HTMLFormElement>("#change-password-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const currentPassword = document.querySelector<HTMLInputElement>("#current-password")!.value;
+    const newPassword = document.querySelector<HTMLInputElement>("#new-password")!.value;
+    const confirm = document.querySelector<HTMLInputElement>("#confirm-new-password")!.value;
+    if (!newPassword || newPassword !== confirm) { document.querySelector("#password-error")!.textContent = t("passwordMismatch"); return; }
+    void changePassword(currentPassword, newPassword);
+  });
+  const main = document.querySelector<HTMLElement>(".settings-main");
+  if (main) main.scrollTop = scrollTop;
   if (focused) document.getElementById(focused)?.focus();
+}
+
+async function changePassword(currentPassword: string, newPassword: string) {
+  if (saving) return;
+  saving = true;
+  const form = document.querySelector<HTMLFormElement>("#change-password-form")!;
+  const controls = form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button");
+  controls.forEach((control) => { control.disabled = true; });
+  const lockControl = document.querySelector<HTMLInputElement>("#lock-on-hide");
+  if (lockControl) lockControl.disabled = true;
+  document.querySelector("#password-error")!.textContent = "";
+  try {
+    await invoke("change_encryption_password", { currentPassword, newPassword });
+    changingPassword = false;
+    passwordChanged = true;
+    saving = false;
+    render();
+    document.querySelector<HTMLElement>("#change-password")?.focus();
+  } catch (error) {
+    console.error(error);
+    const errorMessage = document.querySelector("#password-error");
+    if (errorMessage) errorMessage.textContent = error === "invalid_current_password_or_data" ? t("currentPasswordFailed") : t("encryptionFailed");
+    controls.forEach((control) => { control.disabled = false; });
+    if (lockControl) lockControl.disabled = false;
+    saving = false;
+  }
 }
 
 async function updateVault(command: string, args: Record<string, unknown>) {

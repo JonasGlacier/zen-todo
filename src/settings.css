@@ -1,5 +1,6 @@
 .settings-window { min-width: 440px; background: #fbfbf7; }
-.settings-layout { display: grid; grid-template-columns: 166px minmax(0, 1fr); height: 100%; }
+.settings-layout { position: relative; display: grid; grid-template-columns: 166px minmax(0, 1fr); height: 100%; }
+.settings-drag { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: 18px; cursor: grab; }
 .settings-sidebar { display: flex; flex-direction: column; gap: 30px; padding: 25px 14px 18px; border-right: 1px solid #e0e5d8; background: #f0f3ea; }
 .settings-brand { display: flex; align-items: center; gap: 9px; padding: 0 9px; color: #5b7050; font-size: 13px; font-weight: 600; }
 .settings-brand .lucide { width: 18px; height: 18px; }
@@ -43,3 +44,9 @@
 .encryption-form input { width: 100%; padding: 8px; border: 1px solid #cfd9c2; border-radius: 5px; background: #f6f8f0; color: #3d4a35; font-size: 12px; }
 .encryption-form button { justify-self: start; padding: 8px 12px; border-radius: 5px; background: #748664; color: white; font-size: 12px; }
 .encryption-form button:hover:not(:disabled) { background: #607752; }
+.settings-action { margin-top: 16px; padding: 7px 10px; border: 1px solid #cfd9c2; border-radius: 5px; background: #f6f8f0; color: #5a724c; font-size: 12px; }
+.settings-action:hover { background: #e8efdf; }
+.password-actions { display: flex; gap: 8px; }
+.encryption-form .secondary-button { border: 1px solid #cfd9c2; background: #f6f8f0; color: #5a724c; }
+.encryption-form .secondary-button:hover:not(:disabled) { background: #e8efdf; }
+.settings-success { margin: 10px 0 0; color: #607752; font-size: 11px; }

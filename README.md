@@ -1,5 +1,47 @@
 # Zen Todo
 
+**English** · [简体中文](#简体中文)
+
+A lightweight floating todo app for Windows 10 and 11, built with Tauri 2, Rust, TypeScript, HTML and CSS.
+
+<img src="screenshot.png" alt="Zen Todo showing a list of grouped tasks and their dependencies" width="380">
+
+*App preview with example tasks.*
+
+## Features
+
+- Keep multiple independent lists, organize tasks into groups, and reorder tasks within each group.
+- Link groups as steps with multiple prerequisites. Later tasks become available once all preceding groups are complete; undoing a prerequisite also resets dependent tasks.
+- Collapse groups individually or use Tidy up to organize completed, available, and waiting groups.
+- Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
+- Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
+- Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
+
+## Privacy and storage
+
+Desktop data is stored in `%APPDATA%/com.zentodo.app/todos.json`. Encryption is **off by default**; enable it under **Settings → Privacy**. Zen Todo uses Argon2id to derive a key and AES-256-GCM to encrypt the lists. The password can be changed after entering the current password. **A forgotten encryption password cannot be recovered.**
+
+When lock-on-hide is enabled, reopening from the tray requires the password, and unsent drafts are retained encrypted in the tray process. Old `todos.json.tmp` files, system backups, or other existing copies may still contain plaintext. Browser development mode stores data in localStorage and does not provide this encryption. Cross-device synchronization is not yet implemented.
+
+## Development
+
+Requirements: Node.js 22.18 or later, Rust stable, and the Windows WebView2 Runtime.
+
+```bash
+npm install
+npm run dev          # browser development preview
+npm test             # task-dependency tests
+npm run build        # frontend build
+npm run tauri dev    # desktop development
+npm run tauri build  # Windows installer
+```
+
+The repository also includes a GitHub Actions workflow to build the Windows installer; download the `zen-todo-windows-installer` artifact from the workflow run.
+
+---
+
+## 简体中文
+
 一个面向 Windows 10/11 的轻量悬浮待办应用。使用 Tauri 2、Rust 和原生 HTML/CSS/TypeScript 构建。
 
 ## 当前功能
@@ -39,7 +81,7 @@
 
 ## 设置与语言
 
-点击右上角齿轮打开独立设置窗口，默认尺寸为 640×480，最小尺寸为 480×360，支持调整大小与系统标题栏操作。窗口采用左侧分类、右侧设置内容的布局，未来可以继续增加分类及设置项。重复点击齿轮会激活已有设置窗口；关闭设置窗口不会退出应用，也不影响主窗口使用。
+点击右上角齿轮打开独立设置窗口，默认尺寸为 640×480，最小尺寸为 480×360，可通过窗口顶部空白区域拖动。窗口采用左侧分类、右侧设置内容的布局。重复点击齿轮会激活已有设置窗口；关闭设置窗口不会退出应用，也不影响主窗口使用。
 
 在“通用 → 语言”中选择简体中文或 English，设置即时保存。语言偏好单独保存在 WebView / 浏览器的 `zen-todo-settings` 中，下次打开自动恢复。跨窗口通过 storage 事件与 Tauri 事件同步，切换语言不会修改已有列表名称、组名和待办内容，也不会丢失主窗口中正在编辑的草稿。
 
@@ -50,6 +92,8 @@
 桌面版默认不加密。在设置的“隐私 → 本地数据加密”中输入两次密码并开启后，应用使用 Argon2id 派生密钥，以 AES-256-GCM 加密所有列表。迁移时先验证密文，再通过临时文件替换 `todos.json`；后续保存的临时文件也只包含密文。密码不会保存到文件中，**忘记密码将无法恢复数据**，请使用可靠的密码管理方式。
 
 重启应用需要输入密码。可在设置中开启“隐藏到托盘时锁定”，此时关闭或隐藏窗口后重新显示也需要密码；未提交的输入草稿会在托盘进程内以密文保留，解锁后恢复。关闭该选项时，应用在托盘运行期间保持解锁，直到退出应用。
+
+加密开启后可在“隐私 → 本地数据加密”中修改密码；需要输入当前密码和两次新密码。应用验证原密码并以新密码重新加密，写入成功后才切换密钥。
 
 加密文件带有版本和密钥派生参数，可在未来跨平台实现兼容读取；目前尚未实现同步。该功能不加密浏览器开发模式的 localStorage。旧版遗留的 `todos.json.tmp`、系统备份或其他已有副本可能仍包含明文，应用不会擅自删除这些文件；请根据需要自行检查处理。
 

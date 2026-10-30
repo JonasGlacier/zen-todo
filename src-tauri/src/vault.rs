@@ -86,6 +86,16 @@ pub fn open(key: &Key, data: &[u8]) -> Result<Vec<u8>, String> {
     decrypt(key, &envelope.nonce, &envelope.ciphertext)
 }
 
+pub fn rekey(data: &[u8], current_password: &str, new_password: &str) -> Result<(Key, Key, Vec<u8>, Vec<u8>), String> {
+    if new_password.is_empty() { return Err("Password required".into()); }
+    let (old_key, plaintext) = unlock(data, current_password).map_err(|_| "invalid_current_password_or_data".to_string())?;
+    let new_key = create(new_password)?;
+    let encrypted = seal(&new_key, &plaintext)?;
+    let verified = open(&new_key, &encrypted)?;
+    if verified != plaintext { return Err("Encryption verification failed".into()); }
+    Ok((old_key, new_key, encrypted, plaintext))
+}
+
 pub fn atomic_write(path: &Path, data: &[u8]) -> Result<(), String> {
     let mut tmp = tempfile::NamedTempFile::new_in(path.parent().ok_or("Invalid data path")?).map_err(|e| e.to_string())?;
     tmp.write_all(data).and_then(|_| tmp.as_file().sync_all()).map_err(|e| e.to_string())?;
@@ -123,5 +133,26 @@ mod tests {
         assert!(unlock(&saved, "wrong").is_err());
         assert_eq!(std::fs::read(&path).unwrap(), saved);
         assert_eq!(unlock(&saved, "secret").unwrap().1, original);
+    }
+
+    #[test]
+    fn changing_password_preserves_data_and_rejects_wrong_password() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("todos.json");
+        let original = "待办 and draft".as_bytes();
+        let old_key = create("old password").unwrap();
+        let encrypted = seal(&old_key, original).unwrap();
+        atomic_write(&path, &encrypted).unwrap();
+        assert!(rekey(&encrypted, "wrong", "new password").is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), encrypted);
+        assert!(rekey(&encrypted, "old password", "").is_err());
+        let (_, new_key, changed, plaintext) = rekey(&encrypted, "old password", "new password").unwrap();
+        assert_eq!(plaintext, original);
+        let draft = seal(&old_key, b"draft").unwrap();
+        let resealed_draft = seal(&new_key, &open(&old_key, &draft).unwrap()).unwrap();
+        atomic_write(&path, &changed).unwrap();
+        assert!(unlock(&std::fs::read(&path).unwrap(), "old password").is_err());
+        assert_eq!(unlock(&std::fs::read(&path).unwrap(), "new password").unwrap().1, original);
+        assert_eq!(open(&new_key, &resealed_draft).unwrap(), b"draft");
     }
 }

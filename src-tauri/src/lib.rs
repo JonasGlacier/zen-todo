@@ -162,6 +162,23 @@ fn unlock_vault<R: Runtime>(app: AppHandle<R>, password: String) -> Result<(), S
 }
 
 #[tauri::command]
+fn change_encryption_password<R: Runtime>(app: AppHandle<R>, current_password: String, new_password: String) -> Result<(), String> {
+    let state = app.state::<VaultRuntime>();
+    let mut vault = state.0.lock().map_err(|e| e.to_string())?;
+    if vault.key.is_none() { return Err("Vault locked".into()); }
+    if !with_ui(&app, |ui| ui.phase == UiPhase::Visible && ui.ready)? { return Err("Window is suspending".into()); }
+    let path = data_file(&app)?;
+    let data = fs::read(&path).map_err(|e| e.to_string())?;
+    let (old_key, new_key, encrypted, plaintext) = vault::rekey(&data, &current_password, &new_password)?;
+    let _: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
+    let session = vault.sealed_session.as_ref().map(|value| vault::open(&old_key, value).and_then(|v| vault::seal(&new_key, &v))).transpose()?;
+    vault::atomic_write(&path, &encrypted)?;
+    vault.key = Some(new_key);
+    vault.sealed_session = session;
+    Ok(())
+}
+
+#[tauri::command]
 fn set_lock_on_hide<R: Runtime>(app: AppHandle<R>, value: bool) -> Result<(), String> {
     let path = data_file(&app)?.with_file_name("vault-settings.json");
     vault::atomic_write(&path, &serde_json::to_vec(&value).map_err(|e| e.to_string())?)
@@ -345,7 +362,7 @@ async fn open_settings<R: Runtime>(app: AppHandle<R>, language: String) -> Resul
         .inner_size(640.0, 480.0)
         .min_inner_size(480.0, 360.0)
         .resizable(true)
-        .decorations(true)
+        .decorations(false)
         .center()
         .parent(&main_window(&app)?).map_err(|error| error.to_string())?
         .build().map_err(|error| error.to_string())?;
@@ -440,7 +457,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, change_encryption_password, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
         .build(tauri::generate_context!())
         .expect("error while building Zen Todo")
         .run(|_, event| {
