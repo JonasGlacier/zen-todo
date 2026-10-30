@@ -137,6 +137,7 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
 
 function render() {
   const listScroll = document.querySelector(".list")?.scrollTop ?? 0;
+  const activeList = workspace.lists.find((list) => list.id === workspace.activeListId)!;
   const pending = board.todos.filter((todo) => !todo.completed);
   const available = pending.filter((todo) => groupReady(board, todo.groupId)).length;
   const completed = board.todos.length - pending.length;
@@ -148,17 +149,18 @@ function render() {
   const roots = board.groups.filter((group) => !owner.has(group.id));
   app.innerHTML = `<section class="shell">
     <div class="window-drag-region" aria-label="拖动窗口"></div>
-    <header class="controls"><div><strong>Zen Todo</strong><span class="status">${pending.length ? `${available} 项可做${pending.length > available ? ` · ${pending.length - available} 项等待` : ""}` : completed ? "全部完成" : "一步一步，慢慢来"}</span></div>
+    <header class="controls"><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(activeList.title)}" aria-label="列表名称，点击编辑" title="点击修改列表名称" maxlength="80"/><span class="status">${pending.length ? `${available} 项可做${pending.length > available ? ` · ${pending.length - available} 项等待` : ""}` : completed ? "全部完成" : "一步一步，慢慢来"}</span></div>
       <div class="window-actions"><button class="icon-button" id="organize-button" title="一键整理" aria-label="一键整理">${icon("organize")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="${pinned ? "取消置顶" : "置顶窗口"}">⌃</button><button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button></div>
     </header>
+    <div class="workspace">
+    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
+      <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> 新建分组</button>
+      <button class="delete-list-button" id="delete-list" title="长按删除当前列表">长按删除列表</button>
+    </div>
     <div class="tabs-bar">
       <div class="tabs" role="tablist" aria-label="待办列表">${workspace.lists.map((list) => `<button class="tab ${list.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${list.id === workspace.activeListId}" aria-controls="todo-list" data-list="${list.id}" title="${escapeHtml(list.title)}">${escapeHtml(list.title)}</button>`).join("")}</div>
       <button class="tab-action" id="new-list" title="新建列表" aria-label="新建列表">＋</button>
-      <button class="tab-action" id="rename-list" title="重命名当前列表" aria-label="重命名当前列表">✎</button>
-      <button class="tab-action" id="delete-list" title="删除当前列表" aria-label="删除当前列表">×</button>
     </div>
-    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
-      <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> 新建分组</button>
     </div>
     <footer class="footer"><span>${board.groups.length} 组 · ${pending.length} 项待完成</span>${completed ? `<button id="clear-completed">清除已完成 · ${completed}</button>` : "<span>保持专注</span>"}</footer>
     <div class="notice ${message ? "visible" : ""}" role="status">${escapeHtml(message)}</div>
@@ -250,21 +252,63 @@ function bindEvents() {
       draggedId = null;
     });
   });
-  document.querySelector("#rename-list")!.addEventListener("click", () => {
-    const list = workspace.lists.find((item) => item.id === workspace.activeListId)!;
-    const title = window.prompt("列表名称", list.title)?.trim();
-    if (!title || title === list.title) return;
-    void change(() => { const target = workspace.lists.find((item) => item.id === list.id); if (target) target.title = title.slice(0, 80); });
-  });
-  document.querySelector("#delete-list")!.addEventListener("click", () => {
-    const list = workspace.lists.find((item) => item.id === workspace.activeListId)!;
-    if (!window.confirm(`删除列表“${list.title}”及其中的所有待办？`)) return;
+  const listName = document.querySelector<HTMLInputElement>("#list-name")!;
+  const listId = workspace.activeListId;
+  listName.addEventListener("blur", () => {
+    const list = workspace.lists.find((item) => item.id === listId);
+    if (!list) return;
+    const title = listName.value.trim();
+    if (!title || title === list.title) { listName.value = list.title; return; }
     void change(() => {
-      deleteList(workspace, list.id);
-      board = workspace.lists.find((item) => item.id === workspace.activeListId)!.board;
-      composer = null;
-      draggedId = null;
+      const target = workspace.lists.find((item) => item.id === listId);
+      if (target) target.title = title;
+    }, undefined, false).then(() => {
+      const saved = workspace.lists.find((item) => item.id === listId);
+      if (!saved) return;
+      listName.value = saved.title;
+      const tab = document.querySelector<HTMLElement>(`[data-list="${listId}"]`);
+      if (tab) { tab.textContent = saved.title; tab.title = saved.title; }
     });
+  });
+  listName.addEventListener("keydown", (event) => {
+    if (event.isComposing) return;
+    if (event.key === "Enter") { event.preventDefault(); listName.blur(); }
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      listName.value = workspace.lists.find((item) => item.id === listId)?.title ?? "";
+      listName.blur();
+    }
+  });
+  const deleteButton = document.querySelector<HTMLButtonElement>("#delete-list")!;
+  let holdTimer: ReturnType<typeof setTimeout> | undefined;
+  const cancelHold = () => {
+    clearTimeout(holdTimer);
+    holdTimer = undefined;
+    deleteButton.classList.remove("is-holding");
+  };
+  const startHold = () => {
+    if (holdTimer) return;
+    deleteButton.classList.add("is-holding");
+    holdTimer = setTimeout(() => {
+      holdTimer = undefined;
+      deleteButton.classList.remove("is-holding");
+      if (!deleteButton.isConnected) return;
+      void change(() => {
+        if (workspace.activeListId !== listId) return;
+        deleteList(workspace, listId);
+        board = workspace.lists.find((item) => item.id === workspace.activeListId)!.board;
+        composer = null;
+        draggedId = null;
+      });
+    }, 1500);
+  };
+  deleteButton.addEventListener("pointerdown", (event) => { if (event.button === 0) startHold(); });
+  for (const event of ["pointerup", "pointerleave", "pointercancel", "blur"] as const) deleteButton.addEventListener(event, cancelHold);
+  deleteButton.addEventListener("keydown", (event) => {
+    if (event.key === " " || event.key === "Enter") { event.preventDefault(); startHold(); }
+  });
+  deleteButton.addEventListener("keyup", (event) => {
+    if (event.key === " " || event.key === "Enter") { event.preventDefault(); cancelHold(); }
   });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", () => handleAction(button));

@@ -10,20 +10,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:f
 .shell { position: relative; display: flex; height: 100%; flex-direction: column; padding: 9px 12px 10px; }
 .window-drag-region { flex: 0 0 5px; margin: -3px 0 9px; border-radius: 5px; background: #e3e4db; cursor: grab; }
 .controls { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 11px; }
-.controls strong { display: block; font-size: 14px; font-weight: 600; letter-spacing: .2px; }
+.heading { min-width: 0; }
+.list-name { display: block; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: inherit; font-size: 14px; font-weight: 600; letter-spacing: .2px; text-overflow: ellipsis; }
+.list-name:hover, .list-name:focus { background: #e8ecdf; }
 .status { display: block; margin-top: 4px; color: #85897c; font-size: 10px; }
 .window-actions { display: flex; gap: 3px; }
 .icon-button { display: grid; width: 25px; height: 25px; place-items: center; color: #929789; border-radius: 6px; font-size: 17px; }
 .icon-button:hover, .icon-button.is-active { background: #e8ecdf; color: #617356; }
 .icon-button svg { width: 16px; height: 16px; }
-.tabs-bar { display: flex; align-items: center; gap: 2px; min-width: 0; margin: 0 0 9px; border-bottom: 1px solid #dce1d2; }
-.tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
-.tab { flex: 0 0 auto; max-width: 120px; padding: 7px 10px; border-bottom: 2px solid transparent; color: #929b86; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workspace { display: flex; flex: 1; min-height: 0; gap: 8px; }
+.tabs-bar { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 0; border-left: 1px solid #dce1d2; }
+.tabs { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
+.tab { flex: 0 0 auto; max-height: 120px; padding: 10px 7px; border-left: 2px solid transparent; color: #929b86; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; writing-mode: vertical-rl; text-orientation: sideways; }
 .tab:hover { color: #60734e; background: #edf0e5; }
-.tab.is-selected { border-bottom-color: #7b8b6b; color: #526848; font-weight: 600; }
-.tab-action { flex: 0 0 23px; height: 25px; padding: 0; border-radius: 4px; color: #889579; font-size: 16px; }
+.tab.is-selected { border-left-color: #7b8b6b; color: #526848; font-weight: 600; }
+.tab-action { flex: 0 0 25px; width: 25px; padding: 0; border-radius: 4px; color: #889579; font-size: 16px; }
 .tab-action:hover { background: #e8ecdf; color: #526848; }
-.list { flex: 1; min-height: 0; overflow: auto; padding: 2px 3px 8px; margin: 0 -3px; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
+.list { flex: 1; min-width: 0; min-height: 0; overflow: auto; padding: 2px 3px 8px; margin: 0 -3px; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
 .step { border: 1px solid #c8cebd; border-radius: 3px; background: #fffef9; margin-bottom: 9px; }
 .previous-steps { padding: 0 0 0 9px; border-bottom: 1px solid #c8cebd; background: #f0f2e9; }
 .previous-steps > .step { margin: -1px -1px 7px 0; border-top-left-radius: 0; border-bottom-right-radius: 0; }
@@ -86,6 +89,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:f
 .existing button:hover { background: #e1e8d5; }
 .new-group-button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px; border: 1px dashed #cdd3c0; border-radius: 3px; color: #889579; font-size: 11px; text-align: left; }
 .new-group-button:hover { background: #edf0e5; color: #60734e; }
+.delete-list-button { display: block; width: 100%; margin-top: 20px; padding: 8px; border-radius: 3px; color: #ae9388; font-size: 10px; text-align: center; user-select: none; touch-action: manipulation; }
+.delete-list-button:hover { color: #ab6559; background: #f5ebe6; }
+.delete-list-button.is-holding { color: #ab6559; background: linear-gradient(to right, #eed8ce 100%, #f5ebe6 100%) left / 0% 100% no-repeat #f5ebe6; animation: hold-delete 1.5s linear forwards; }
+@keyframes hold-delete { to { background-size: 100% 100%; } }
 input::placeholder { color: #a1a894; }
 .footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; min-height: 22px; margin-top: 5px; color: #969d89; font-size: 10px; }
 .footer button { color: #808d72; font-size: 10px; padding: 3px 0; }
