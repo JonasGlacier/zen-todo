@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Zen Todo",
+  "version": "0.1.0",
+  "identifier": "com.zentodo.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Zen Todo",
+        "width": 360,
+        "height": 540,
+        "minWidth": 320,
+        "minHeight": 420,
+        "resizable": true,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "visible": true,
+        "skipTaskbar": true
+      }
+    ],
+    "security": { "csp": "default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'" }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "windows": { "webviewInstallMode": { "type": "downloadBootstrapper" } }
+  }
+}
