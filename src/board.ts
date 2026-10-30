@@ -10,6 +10,7 @@ export type Group = {
   id: string;
   title: string;
   prerequisiteIds: string[];
+  collapsed?: boolean;
 };
 
 export type Board = { groups: Group[]; todos: Todo[] };

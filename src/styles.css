@@ -15,6 +15,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:f
 .window-actions { display: flex; gap: 3px; }
 .icon-button { display: grid; width: 25px; height: 25px; place-items: center; color: #929789; border-radius: 6px; font-size: 17px; }
 .icon-button:hover, .icon-button.is-active { background: #e8ecdf; color: #617356; }
+.icon-button svg { width: 16px; height: 16px; }
 .list { flex: 1; min-height: 0; overflow: auto; padding: 2px 3px 8px; margin: 0 -3px; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
 .step { border: 1px solid #c8cebd; border-radius: 3px; background: #fffef9; margin-bottom: 9px; }
 .previous-steps { padding: 0 0 0 9px; border-bottom: 1px solid #c8cebd; background: #f0f2e9; }
@@ -24,6 +25,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:f
 .deep-step > .previous-steps { padding-left: 4px; }
 .group-body { padding: 5px 7px 5px; }
 .group-header { display: flex; align-items: center; gap: 5px; min-height: 24px; }
+.fold-button { display: grid; width: 17px; height: 22px; flex: 0 0 auto; padding: 2px; place-items: center; border-radius: 3px; color: #8a967c; }
+.fold-button svg { width: 12px; height: 12px; }
+.fold-button.is-expanded svg { transform: rotate(90deg); }
+.fold-button:hover { color: #526848; background: #e9eddf; }
+.group-content[hidden] { display: none; }
 .group-name { min-width: 0; width: 100%; flex: 1; padding: 3px 2px; border: 1px solid transparent; border-radius: 3px; background: transparent; font-size: 11px; font-weight: 600; color: #68755f; text-overflow: ellipsis; }
 .group-name:hover { border-color: #dce1d2; }
 .group-name:focus { background: #fff; }

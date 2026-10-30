@@ -22,11 +22,13 @@ const icons = {
   previous: '<path d="m8 7 4-4 4 4M12 3v12M5 15v6h14v-6"/>',
   next: '<path d="m8 17 4 4 4-4M12 21V9M5 9V3h14v6"/>',
   delete: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
+  chevron: '<path d="m9 5 7 7-7 7"/>',
+  organize: '<path d="M4 5h9M4 12h13M4 19h9M18 2l1.2 3.8L23 7l-3.8 1.2L18 12l-1.2-3.8L13 7l3.8-1.2L18 2Z"/>',
 };
 const icon = (key: keyof typeof icons) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key]}</svg>`;
 
 function newGroup(title = ""): Group {
-  const group = { id: crypto.randomUUID(), title, prerequisiteIds: [] };
+  const group = { id: crypto.randomUUID(), title, prerequisiteIds: [], collapsed: false };
   board.groups.push(group);
   return group;
 }
@@ -99,6 +101,7 @@ function composerTemplate(group: Group) {
 function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): string {
   const ready = groupReady(board, group.id);
   const complete = groupComplete(board, group.id);
+  const collapsed = group.collapsed ?? false;
   const tasks = board.todos.filter((todo) => todo.groupId === group.id);
   const done = tasks.filter((todo) => todo.completed).length;
   const predecessors = group.prerequisiteIds.map((id) => {
@@ -111,6 +114,7 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
     ${predecessors ? `<div class="previous-steps">${predecessors}</div>` : ""}
     <div class="group-body ${!ready ? "is-blocked" : ""}">
       <header class="group-header">
+        <button class="fold-button ${collapsed ? "" : "is-expanded"}" id="fold-${group.id}" data-action="fold" data-id="${group.id}" title="${collapsed ? "展开分组" : "折叠分组"}" aria-label="${collapsed ? "展开" : "折叠"}${escapeHtml(name(group.id))}" aria-expanded="${!collapsed}" aria-controls="content-${group.id}">${icon("chevron")}</button>
         <input class="group-name" value="${escapeHtml(group.title)}" placeholder="组名（可选）" aria-label="组名（可选）" data-rename="${group.id}" maxlength="80" />
         <span class="group-count" title="${complete ? "本组已完成" : "本组完成进度"}">${done}/${tasks.length}</span>
         <div class="group-tools" role="group" aria-label="分组操作">
@@ -120,8 +124,10 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
           <button class="danger" data-action="delete-group" data-id="${group.id}" title="删除本组" aria-label="删除本组">${icon("delete")}</button>
         </div>
       </header>
-      <div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
-      ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">＋ 添加第一条待办</button>`}
+      <div class="group-content" id="content-${group.id}" ${collapsed ? "hidden" : ""}>
+        <div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
+        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">＋ 添加第一条待办</button>`}
+      </div>
     </div>
   </section>`;
 }
@@ -140,7 +146,7 @@ function render() {
   app.innerHTML = `<section class="shell">
     <div class="window-drag-region" aria-label="拖动窗口"></div>
     <header class="controls"><div><strong>Zen Todo</strong><span class="status">${pending.length ? `${available} 项可做${pending.length > available ? ` · ${pending.length - available} 项等待` : ""}` : completed ? "全部完成" : "一步一步，慢慢来"}</span></div>
-      <div class="window-actions"><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="${pinned ? "取消置顶" : "置顶窗口"}">⌃</button><button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button></div>
+      <div class="window-actions"><button class="icon-button" id="organize-button" title="一键整理" aria-label="一键整理">${icon("organize")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="${pinned ? "取消置顶" : "置顶窗口"}">⌃</button><button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button></div>
     </header>
     <div class="list" id="todo-list">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
       <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> 新建分组</button>
@@ -159,10 +165,13 @@ function resizeTodo(input: HTMLTextAreaElement) {
 }
 
 function openComposer(groupId: string, mode: "task" | "previous" | "next") {
-  composer = { groupId, mode };
-  render();
-  document.querySelector<HTMLElement>("#step-input, .inline-form .create-step")?.focus();
-  document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
+  void change(() => {
+    board.groups.find((group) => group.id === groupId)!.collapsed = false;
+    composer = { groupId, mode };
+  }).then(() => {
+    document.querySelector<HTMLElement>("#step-input, .inline-form .create-step")?.focus();
+    document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
+  });
 }
 
 function handleAction(button: HTMLButtonElement) {
@@ -170,14 +179,20 @@ function handleAction(button: HTMLButtonElement) {
   if (action === "close-composer") { composer = null; render(); return; }
   if (action === "task" || action === "previous" || action === "next") { openComposer(id, action); return; }
   if (action === "jump") {
-    const target = document.getElementById(`group-${id}`);
-    target?.scrollIntoView({ behavior: "smooth", block: "center" });
-    target?.classList.remove("highlight");
-    requestAnimationFrame(() => target?.classList.add("highlight"));
+    void change(() => { board.groups.find((group) => group.id === id)!.collapsed = false; }).then(() => {
+      const target = document.getElementById(`group-${id}`);
+      target?.querySelector(":scope > .group-body")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(`fold-${id}`)?.focus({ preventScroll: true });
+      requestAnimationFrame(() => target?.classList.add("highlight"));
+    });
     return;
   }
   void change(() => {
-    if (action === "create-previous" || action === "create-next") {
+    if (action === "fold") {
+      const group = board.groups.find((group) => group.id === id)!;
+      group.collapsed = !group.collapsed;
+      if (group.collapsed && composer?.groupId === id) composer = null;
+    } else if (action === "create-previous" || action === "create-next") {
       const group = newGroup();
       linkGroups(board, action === "create-previous" ? group.id : id, action === "create-previous" ? id : group.id);
       composer = { groupId: group.id, mode: "task" };
@@ -196,7 +211,7 @@ function handleAction(button: HTMLButtonElement) {
       linkGroups(board, action === "link-previous" ? id : groupId, action === "link-previous" ? groupId : id);
       composer = null;
     }
-  }, action === "create-previous" || action === "create-next" ? "step-input" : undefined).then(() => {
+  }, action === "fold" ? `fold-${id}` : action === "create-previous" || action === "create-next" ? "step-input" : undefined).then(() => {
     if (action === "create-previous" || action === "create-next") document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
   });
 }
@@ -273,6 +288,14 @@ function bindEvents() {
   });
   document.querySelector("#clear-completed")?.addEventListener("click", () => {
     void change(() => { clearCompleted(board); composer = null; });
+  });
+  document.querySelector("#organize-button")!.addEventListener("click", () => {
+    void change(() => {
+      for (const group of board.groups) {
+        group.collapsed = groupComplete(board, group.id) || !groupReady(board, group.id);
+      }
+      if (composer && board.groups.find((group) => group.id === composer!.groupId)?.collapsed) composer = null;
+    }, "organize-button");
   });
   document.querySelector("#pin-button")!.addEventListener("click", async () => {
     try {

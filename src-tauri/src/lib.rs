@@ -18,6 +18,8 @@ struct Group {
     id: String,
     title: String,
     prerequisite_ids: Vec<String>,
+    #[serde(default)]
+    collapsed: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
