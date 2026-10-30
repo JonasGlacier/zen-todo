@@ -15,6 +15,28 @@ export type Group = {
 
 export type Board = { groups: Group[]; todos: Todo[] };
 
+export type TodoList = { id: string; title: string; board: Board };
+export type Workspace = { lists: TodoList[]; activeListId: string };
+
+export function createList(title = "新列表"): TodoList {
+  return { id: crypto.randomUUID(), title, board: { groups: [], todos: [] } };
+}
+
+export function createWorkspace(): Workspace {
+  const list = createList("我的待办");
+  return { lists: [list], activeListId: list.id };
+}
+
+export function deleteList(workspace: Workspace, id: string): void {
+  const index = workspace.lists.findIndex((list) => list.id === id);
+  if (index < 0) return;
+  workspace.lists.splice(index, 1);
+  if (!workspace.lists.length) workspace.lists.push(createList("我的待办"));
+  if (workspace.activeListId === id) {
+    workspace.activeListId = workspace.lists[Math.min(index, workspace.lists.length - 1)].id;
+  }
+}
+
 export function groupComplete(board: Board, id: string): boolean {
   const tasks = board.todos.filter((todo) => todo.groupId === id);
   // An empty step must not silently unlock its successors.
