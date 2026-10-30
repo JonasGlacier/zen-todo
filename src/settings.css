@@ -32,3 +32,7 @@
   .settings-card { padding: 13px; }
   .setting-row { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
+.encryption-form { display: grid; gap: 12px; }
+.encryption-form label { display: grid; gap: 5px; font-size: 13px; }
+.encryption-form input { padding: 8px; border: 1px solid #c8cebd; border-radius: 4px; background: #fffef9; }
+.encryption-form button { justify-self: start; padding: 8px 12px; border-radius: 4px; background: #748664; color: white; }

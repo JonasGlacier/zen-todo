@@ -2,6 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
+mod vault;
+
+#[derive(Default)]
+struct VaultState { key: Option<vault::Key>, sealed_session: Option<Vec<u8>> }
+#[derive(Default)]
+struct VaultRuntime(Mutex<VaultState>);
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VaultStatus { encrypted: bool, locked: bool, lock_on_hide: bool, legacy_temp: bool }
+
 #[derive(Clone, Copy, PartialEq)]
 enum UiPhase { Visible, Suspending, Hidden, Restoring }
 
@@ -83,19 +93,78 @@ fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 
 #[tauri::command]
 fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Option<Workspace>, String> {
+    let state = app.state::<VaultRuntime>();
+    let vault = state.0.lock().map_err(|e| e.to_string())?;
     let path = data_file(&app)?;
     if !path.exists() { return Ok(None); }
-    let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&contents).map(Some).map_err(|error| error.to_string())
+    let contents = fs::read(path).map_err(|error| error.to_string())?;
+    let contents = if vault::is_encrypted(&contents)? { vault::open(vault.key.as_ref().ok_or("Vault locked")?, &contents)? } else { contents };
+    serde_json::from_slice(&contents).map(Some).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 fn save_board<R: Runtime>(app: AppHandle<R>, board: Workspace) -> Result<(), String> {
+    let state = app.state::<VaultRuntime>();
+    let vault = state.0.lock().map_err(|e| e.to_string())?;
     let path = data_file(&app)?;
-    let temporary = path.with_extension("json.tmp");
-    let contents = serde_json::to_string_pretty(&board).map_err(|error| error.to_string())?;
-    fs::write(&temporary, contents).map_err(|error| error.to_string())?;
-    fs::rename(temporary, path).map_err(|error| error.to_string())
+    let contents = serde_json::to_vec(&board).map_err(|error| error.to_string())?;
+    let encrypted = if path.exists() { vault::is_encrypted(&fs::read(&path).map_err(|e| e.to_string())?)? } else { vault.key.is_some() };
+    let contents = if encrypted || vault.key.is_some() { vault::seal(vault.key.as_ref().ok_or("Vault locked")?, &contents)? } else { contents };
+    vault::atomic_write(&path, &contents)
+}
+
+fn lock_on_hide(path: &std::path::Path) -> Result<bool, String> {
+    match fs::read(path.with_file_name("vault-settings.json")) {
+        Ok(data) => serde_json::from_slice::<bool>(&data).map_err(|e| e.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn vault_status<R: Runtime>(app: AppHandle<R>) -> Result<VaultStatus, String> {
+    let state = app.state::<VaultRuntime>();
+    let vault = state.0.lock().map_err(|e| e.to_string())?;
+    let path = data_file(&app)?;
+    let encrypted = if path.exists() { vault::is_encrypted(&fs::read(&path).map_err(|e| e.to_string())?)? } else { false };
+    Ok(VaultStatus { encrypted, locked: encrypted && vault.key.is_none(), lock_on_hide: lock_on_hide(&path)?, legacy_temp: path.with_extension("json.tmp").exists() })
+}
+
+#[tauri::command]
+fn enable_encryption<R: Runtime>(app: AppHandle<R>, password: String) -> Result<(), String> {
+    if password.is_empty() { return Err("Password required".into()); }
+    let state = app.state::<VaultRuntime>();
+    let mut vault = state.0.lock().map_err(|e| e.to_string())?;
+    if !with_ui(&app, |ui| ui.phase == UiPhase::Visible && ui.ready)? { return Err("Window is suspending".into()); }
+    let path = data_file(&app)?;
+    let data = fs::read(&path).map_err(|e| e.to_string())?;
+    if vault::is_encrypted(&data)? { return Err("Encryption already enabled".into()); }
+    let _: Workspace = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+    let key = vault::create(&password)?;
+    let encrypted = vault::seal(&key, &data)?;
+    let (_, verified) = vault::unlock(&encrypted, &password)?;
+    if verified != data { return Err("Encryption verification failed".into()); }
+    vault::atomic_write(&path, &encrypted)?;
+    vault.key = Some(key);
+    with_ui(&app, |ui| ui.session = None)?;
+    Ok(())
+}
+
+#[tauri::command]
+fn unlock_vault<R: Runtime>(app: AppHandle<R>, password: String) -> Result<(), String> {
+    let state = app.state::<VaultRuntime>();
+    let mut vault = state.0.lock().map_err(|e| e.to_string())?;
+    let data = fs::read(data_file(&app)?).map_err(|e| e.to_string())?;
+    let (key, plaintext) = vault::unlock(&data, &password)?;
+    let _: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
+    vault.key = Some(key);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_lock_on_hide<R: Runtime>(app: AppHandle<R>, value: bool) -> Result<(), String> {
+    let path = data_file(&app)?.with_file_name("vault-settings.json");
+    vault::atomic_write(&path, &serde_json::to_vec(&value).map_err(|e| e.to_string())?)
 }
 
 fn main_window<R: Runtime>(app: &AppHandle<R>) -> Result<WebviewWindow<R>, String> {
@@ -110,11 +179,21 @@ fn set_always_on_top<R: Runtime>(app: AppHandle<R>, value: bool) -> Result<(), S
 
 #[tauri::command]
 fn load_session<R: Runtime>(app: AppHandle<R>) -> Result<Option<serde_json::Value>, String> {
+    let state = app.state::<VaultRuntime>();
+    let mut vault = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(session) = vault.sealed_session.as_ref() {
+        let bytes = vault::open(vault.key.as_ref().ok_or("Vault locked")?, session)?;
+        let result = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        vault.sealed_session = None;
+        return Ok(Some(result));
+    }
     with_ui(&app, |ui| ui.session.clone())
 }
 
 #[tauri::command]
 async fn hide_window<R: Runtime>(app: AppHandle<R>, session: Option<serde_json::Value>) -> Result<(), String> {
+    let path = data_file(&app)?;
+    let lock = lock_on_hide(&path)? && path.exists() && vault::is_encrypted(&fs::read(&path).map_err(|e| e.to_string())?)?;
     let main = main_window(&app)?;
     let position = main.outer_position().ok();
     let size = main.inner_size().ok();
@@ -125,16 +204,38 @@ async fn hide_window<R: Runtime>(app: AppHandle<R>, session: Option<serde_json::
         ui.ready = false;
         ui.hide_requested = false;
         ui.destroying = windows.iter().map(|window| window.label().to_string()).collect();
-        if session.is_some() { ui.session = session; }
+        if !lock && session.is_some() { ui.session = session.clone(); }
         ui.position = position;
         ui.size = size;
         true
     })?;
     if !started { return Ok(()); }
+    let mut locked_key = None;
+    if lock {
+        let result = (|| -> Result<(), String> {
+            let state = app.state::<VaultRuntime>();
+            let mut vault = state.0.lock().map_err(|e| e.to_string())?;
+            if let Some(key) = vault.key.as_ref() {
+                let sealed = session.as_ref().map(|s| serde_json::to_vec(s).map_err(|e| e.to_string()).and_then(|v| vault::seal(key, &v))).transpose()?;
+                with_ui(&app, |ui| ui.session = None)?;
+                vault.sealed_session = sealed;
+                locked_key = vault.key.take();
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let _ = with_ui(&app, |ui| { ui.phase = UiPhase::Visible; ui.ready = true; ui.destroying.clear(); ui.show_requested = false; });
+            return Err(error);
+        }
+    }
     // Destroy the settings WebView too; retaining any WebView can keep the
     // shared browser/GPU processes alive. No window handles are cached here.
     for window in windows {
         if let Err(error) = window.destroy() {
+            if locked_key.is_some() {
+                let state = app.state::<VaultRuntime>();
+                if let Ok(mut vault) = state.0.lock() { vault.key = locked_key.take(); vault.sealed_session = None; };
+            }
             let _ = with_ui(&app, |ui| {
                 ui.phase = UiPhase::Visible;
                 ui.ready = true;
@@ -290,6 +391,7 @@ fn set_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), S
 pub fn run() {
     tauri::Builder::default()
         .manage(UiRuntime::default())
+        .manage(VaultRuntime::default())
         .setup(|app| {
             let menu = tray_menu(app.handle(), "zh-CN").map_err(std::io::Error::other)?;
             let tray_icon = tauri::image::Image::from_app_icon_resource(32)?;
@@ -338,7 +440,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
         .build(tauri::generate_context!())
         .expect("error while building Zen Todo")
         .run(|_, event| {

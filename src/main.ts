@@ -530,23 +530,47 @@ function bindEvents() {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.isComposing || suspending) return;
+  if (event.isComposing || suspending || !initialized) return;
   if (event.key === "Escape") { composer = null; render(); }
 });
 
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
+
+async function unlockIfNeeded() {
+  const status = await invoke<{ locked: boolean }>("vault_status");
+  if (!status.locked) return;
+  app.innerHTML = `<section class="shell unlock"><div class="unlock-drag" data-window-drag></div><button id="unlock-hide" class="unlock-hide" aria-label="${t("hide")}">−</button><form id="unlock-form"><h1>${t("unlockTitle")}</h1><p>${t("unlockHint")}</p><input id="unlock-password" type="password" autocomplete="current-password" aria-label="${t("password")}" required/><button type="submit">${t("unlock")}</button><p id="unlock-error" role="alert"></p></form></section>`;
+  document.querySelector(".unlock-drag")!.addEventListener("pointerdown", () => { void invoke("start_dragging").catch(console.error); });
+  document.querySelector("#unlock-hide")!.addEventListener("click", () => { void suspendToTray(); });
+  await invoke("main_ready");
+  document.querySelector<HTMLInputElement>("#unlock-password")!.focus();
+  await new Promise<void>((resolve) => {
+    const form = document.querySelector<HTMLFormElement>("#unlock-form")!;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const input = document.querySelector<HTMLInputElement>("#unlock-password")!;
+      const button = form.querySelector<HTMLButtonElement>("button")!;
+      button.disabled = true;
+      try { await invoke("unlock_vault", { password: input.value }); input.value = ""; resolve(); }
+      catch (error) { console.error(error); input.value = ""; document.querySelector("#unlock-error")!.textContent = t("unlockFailed"); input.focus(); }
+      finally { button.disabled = false; }
+    });
+  });
+}
 
 async function start() {
   if (isTauri()) {
     const stopHideListener = await listen("tray-hide-requested", () => { void suspendToTray(); });
     window.addEventListener("pagehide", stopHideListener, { once: true });
   }
+  if (isTauri()) await unlockIfNeeded();
   const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
   const session = isTauri() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
   if (!workspace.lists.length || !workspace.lists.some((list) => list.id === workspace.activeListId)) throw new Error("Invalid workspace");
   for (const list of workspace.lists) reconcile(list.board);
   board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
+  if (isTauri() && !stored) await persist();
   restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);
   window.addEventListener("pagehide", dispose, { once: true });

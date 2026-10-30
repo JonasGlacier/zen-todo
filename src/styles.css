@@ -124,3 +124,12 @@ input::placeholder { color: #a1a894; }
 @media (pointer: coarse) { .drag-handle, .delete { opacity: 1; } .todo { min-height: 36px; } }
 .error { justify-content: center; align-items: center; }
 .error p { color: #929b86; font-size: 12px; }
+.unlock { justify-content: center; align-items: center; }
+.unlock-drag { position: absolute; top: 5px; left: 12px; right: 40px; height: 20px; cursor: grab; }
+.unlock-hide { position: absolute; right: 12px; top: 8px; font-size: 20px; }
+.unlock form { display: flex; flex-direction: column; width: min(250px, 100%); gap: 10px; }
+.unlock h1 { margin: 0; font-size: 16px; }
+.unlock p { margin: 0; font-size: 12px; color: #7b8672; }
+.unlock input { padding: 8px; border: 1px solid #c8cebd; border-radius: 4px; background: #fffef9; }
+.unlock form button { padding: 8px; border-radius: 4px; background: #748664; color: white; }
+#unlock-error { color: #ab6559; }
