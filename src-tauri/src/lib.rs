@@ -9,8 +9,23 @@ struct Todo {
     title: String,
     completed: bool,
     created_at: i64,
-    #[serde(default)]
+    group_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Group {
+    id: String,
+    title: String,
     prerequisite_ids: Vec<String>,
+    #[serde(default)]
+    collapsed: bool,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct Board {
+    groups: Vec<Group>,
+    todos: Vec<Todo>,
 }
 
 fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
@@ -20,18 +35,18 @@ fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn load_todos<R: Runtime>(app: AppHandle<R>) -> Result<Vec<Todo>, String> {
+fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Board, String> {
     let path = data_file(&app)?;
-    if !path.exists() { return Ok(Vec::new()); }
+    if !path.exists() { return Ok(Board::default()); }
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
     serde_json::from_str(&contents).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn save_todos<R: Runtime>(app: AppHandle<R>, todos: Vec<Todo>) -> Result<(), String> {
+fn save_board<R: Runtime>(app: AppHandle<R>, board: Board) -> Result<(), String> {
     let path = data_file(&app)?;
     let temporary = path.with_extension("json.tmp");
-    let contents = serde_json::to_string_pretty(&todos).map_err(|error| error.to_string())?;
+    let contents = serde_json::to_string_pretty(&board).map_err(|error| error.to_string())?;
     fs::write(&temporary, contents).map_err(|error| error.to_string())?;
     fs::rename(temporary, path).map_err(|error| error.to_string())
 }
@@ -95,7 +110,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![load_todos, save_todos, set_always_on_top, hide_window, start_dragging])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, set_always_on_top, hide_window, start_dragging])
         .run(tauri::generate_context!())
         .expect("error while running Zen Todo");
 }

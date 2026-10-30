@@ -1,290 +1,361 @@
-import { invoke } from "@tauri-apps/api/core";
-import { canLink, isBlocked, reconcile, removeTodos, type Todo } from "./dependencies";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { canLink, clearCompleted, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
+import type { Board, Group, Todo } from "./board";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
-let todos: Todo[] = [];
+const browserKey = "zen-todo-board";
+let board: Board = { groups: [], todos: [] };
 let pinned = true;
-let expandedId: string | null = null;
-let saveQueue = Promise.resolve();
-let taskDrag: {
-  id: string;
-  source: HTMLElement;
-  pointerId: number;
-  startX: number;
-  startY: number;
-  active: boolean;
-  target: HTMLElement | null;
-  insertAfter: boolean;
-} | null = null;
+let pendingChange = Promise.resolve();
+let message = "";
+let composer: { groupId: string; mode: "task" | "previous" | "next" } | null = null;
+let draggedId: string | null = null;
 
-const escapeHtml = (value: string) =>
-  value.replace(/[&<>'"]/g, (character) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    "'": "&#39;",
-    '"': "&quot;",
-  })[character] ?? character);
+const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
+  "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
+})[character]!);
+const name = (id: string) => board.groups.find((group) => group.id === id)?.title || "未命名组";
+
+const icons = {
+  task: '<path d="M8 5h11M8 12h11M8 19h6M3 5h.01M3 12h.01M3 19h.01M19 16v6M16 19h6"/>',
+  previous: '<path d="m8 7 4-4 4 4M12 3v12M5 15v6h14v-6"/>',
+  next: '<path d="m8 17 4 4 4-4M12 21V9M5 9V3h14v6"/>',
+  delete: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
+  chevron: '<path d="m9 5 7 7-7 7"/>',
+  organize: '<path d="M4 5h9M4 12h13M4 19h9M18 2l1.2 3.8L23 7l-3.8 1.2L18 12l-1.2-3.8L13 7l3.8-1.2L18 2Z"/>',
+};
+const icon = (key: keyof typeof icons) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key]}</svg>`;
+
+function newGroup(title = ""): Group {
+  const group = { id: crypto.randomUUID(), title, prerequisiteIds: [], collapsed: false };
+  board.groups.push(group);
+  return group;
+}
+
+function newTodo(title: string, groupId: string) {
+  board.todos.push({ id: crypto.randomUUID(), title, groupId, completed: false, createdAt: Date.now() });
+}
 
 async function persist() {
-  const snapshot = structuredClone(todos);
-  saveQueue = saveQueue.catch(() => {}).then(() => invoke("save_todos", { todos: snapshot }));
-  await saveQueue;
+  if (isTauri()) await invoke("save_board", { board });
+  else localStorage.setItem(browserKey, JSON.stringify(board));
 }
 
-function render() {
-  const active = todos.filter((todo) => !todo.completed).length;
-  const completed = todos.filter((todo) => todo.completed).length;
-  const scrollTop = document.querySelector<HTMLElement>("#todo-list")?.scrollTop ?? 0;
+// Queue edits and clicks so a slow disk save never discards the next action.
+function change(mutate: () => void, focus?: string, renderAfter = true): Promise<void> {
+  const operation = pendingChange.then(async () => {
+    const previous = structuredClone(board);
+    try {
+      message = "";
+      mutate();
+      reconcile(board);
+      const reset = previous.todos.filter((todo) => todo.completed && board.todos.some((current) =>
+        current.id === todo.id && !current.completed && !groupReady(board, current.groupId))).length;
+      if (reset) message = `已撤销 ${reset} 项后续待办的完成状态`;
+      await persist();
+    } catch (error) {
+      board = previous;
+      message = "保存失败，请重试。";
+      console.error(error);
+    } finally {
+      if (renderAfter) render();
+      else {
+        const notice = document.querySelector<HTMLElement>(".notice")!;
+        notice.textContent = message;
+        notice.classList.toggle("visible", Boolean(message));
+      }
+      if (focus) document.getElementById(focus)?.focus();
+    }
+  });
+  pendingChange = operation.catch(console.error);
+  return operation;
+}
 
-  app.innerHTML = `
-    <section class="shell">
-      <div class="window-drag-region" aria-label="拖动窗口"></div>
-      <header class="controls">
-        <div class="brand"><span class="brand-mark">✳</span><span>ZEN TODO<small>把事情，一步步完成</small></span></div>
-        <div class="window-actions">
-          <button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="置顶窗口">⌃</button>
-          <button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button>
+function todoTemplate(todo: Todo, ready: boolean) {
+  return `<div class="todo ${todo.completed ? "is-completed" : ""}" data-todo="${todo.id}">
+    <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="拖动调整顺序" aria-hidden="true">⠿</span>
+    <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}"
+      ${!ready ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${todo.completed ? "撤销完成" : "完成"}：${escapeHtml(todo.title)}"
+      title="${ready ? "" : "请先完成所有上一步"}">${todo.completed ? "✓" : ""}</button>
+    <textarea class="todo-title" data-edit-todo="${todo.id}" aria-label="编辑待办：${escapeHtml(todo.title)}" rows="1" maxlength="200" spellcheck="false">${escapeHtml(todo.title)}</textarea>
+    <button class="delete" data-action="delete-task" data-id="${todo.id}" title="删除待办" aria-label="删除 ${escapeHtml(todo.title)}">×</button>
+  </div>`;
+}
+
+function composerTemplate(group: Group) {
+  if (composer?.groupId !== group.id) return "";
+  const mode = composer.mode;
+  const direction = mode === "previous" ? "上一步" : "下一步";
+  const candidates = mode === "task" ? [] : board.groups.filter((candidate) =>
+    mode === "previous" ? canLink(board, candidate.id, group.id) : canLink(board, group.id, candidate.id));
+  return `<${mode === "task" ? 'form id="step-form"' : "div"} class="inline-form" data-group="${group.id}" data-mode="${mode}">
+    <div class="composer-heading">${mode === "task" ? "添加待办" : `添加${direction}`}<button type="button" data-action="close-composer" aria-label="取消">×</button></div>
+    ${mode === "task" ? '<div class="input-line"><input id="step-input" aria-label="待办名称" placeholder="要做什么？" autocomplete="off" required maxlength="200"/><button type="submit">添加</button></div>' : `<button class="create-step" data-action="create-${mode}" data-id="${group.id}">＋ 新建分组</button>`}
+    ${mode === "task" ? "" : `<p class="hint">${mode === "previous" ? "新组全部完成后，才能做本组。" : "本组全部完成后，才能做新组。"}</p>
+    ${candidates.length ? `<div class="existing"><span>或关联已有组</span>${candidates.map((candidate) => `<button type="button" data-action="link-${mode}" data-id="${candidate.id}" data-group="${group.id}"><span data-group-label="${candidate.id}">${escapeHtml(name(candidate.id))}</span><span>＋</span></button>`).join("")}</div>` : ""}
+    ${group.prerequisiteIds.length ? `<div class="existing"><span>已关联的上一步</span>${group.prerequisiteIds.map((id) => `<button type="button" data-action="unlink" data-id="${id}" data-group="${group.id}" title="只解除关联，不删除任务"><span data-group-label="${id}">${escapeHtml(name(id))}</span><span>×</span></button>`).join("")}</div>` : ""}`}
+  </${mode === "task" ? "form" : "div"}>`;
+}
+
+function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): string {
+  const ready = groupReady(board, group.id);
+  const complete = groupComplete(board, group.id);
+  const collapsed = group.collapsed ?? false;
+  const tasks = board.todos.filter((todo) => todo.groupId === group.id);
+  const done = tasks.filter((todo) => todo.completed).length;
+  const predecessors = group.prerequisiteIds.map((id) => {
+    const previous = board.groups.find((item) => item.id === id);
+    if (!previous) return "";
+    if (owner.get(id) === group.id) return groupTemplate(previous, owner, depth + 1);
+    return `<button class="shared-step ${groupComplete(board, id) ? "is-done" : ""}" data-action="jump" data-id="${id}" title="定位共享的上一步">${groupComplete(board, id) ? "✓" : "↗"} <span data-group-label="${id}">${escapeHtml(name(id))}</span><span class="shared-caption">共享上一步</span></button>`;
+  }).join("");
+  return `<section class="step ${complete ? "step-complete" : ""} ${depth > 5 ? "deep-step" : ""}" id="group-${group.id}" aria-label="${escapeHtml(name(group.id))}">
+    ${predecessors ? `<div class="previous-steps">${predecessors}</div>` : ""}
+    <div class="group-body ${!ready ? "is-blocked" : ""}">
+      <header class="group-header">
+        <button class="fold-button ${collapsed ? "" : "is-expanded"}" id="fold-${group.id}" data-action="fold" data-id="${group.id}" title="${collapsed ? "展开分组" : "折叠分组"}" aria-label="${collapsed ? "展开" : "折叠"}${escapeHtml(name(group.id))}" aria-expanded="${!collapsed}" aria-controls="content-${group.id}">${icon("chevron")}</button>
+        <input class="group-name" value="${escapeHtml(group.title)}" placeholder="组名（可选）" aria-label="组名（可选）" data-rename="${group.id}" maxlength="80" />
+        <span class="group-count" title="${complete ? "本组已完成" : "本组完成进度"}">${done}/${tasks.length}</span>
+        <div class="group-tools" role="group" aria-label="分组操作">
+          <button data-action="task" data-id="${group.id}" title="添加待办" aria-label="添加待办">${icon("task")}</button>
+          <button data-action="previous" data-id="${group.id}" title="添加上一步" aria-label="添加上一步">${icon("previous")}</button>
+          <button data-action="next" data-id="${group.id}" title="添加下一步" aria-label="添加下一步">${icon("next")}</button>
+          <button class="danger" data-action="delete-group" data-id="${group.id}" title="删除本组" aria-label="删除本组">${icon("delete")}</button>
         </div>
       </header>
-
-      <form class="add-form" id="add-form">
-        <span class="plus">+</span>
-        <input id="todo-input" autocomplete="off" placeholder="接下来要做什么？" aria-label="添加任务" />
-        <button type="submit">添加</button>
-      </form>
-
-      <div class="list-heading"><span>我的待办</span><span>${active} 项进行中</span></div>
-      <div class="list" id="todo-list">
-        ${todos.length === 0 ? `<div class="empty"><span>✦</span><strong>还没有任务</strong><p>把脑中的事情放下来，专注当下。</p></div>` : todos.map(todoTemplate).join("")}
+      <div class="group-content" id="content-${group.id}" ${collapsed ? "hidden" : ""}>
+        <div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
+        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">＋ 添加第一条待办</button>`}
       </div>
-
-      <footer class="footer">
-        <span>${active} 项待完成</span>
-        ${completed > 0 ? `<button id="clear-completed">清除已完成 · ${completed}</button>` : "<span>保持专注</span>"}
-      </footer>
-    </section>
-  `;
-
-  document.querySelector<HTMLFormElement>("#add-form")!.addEventListener("submit", addTodo);
-  document.querySelector<HTMLButtonElement>("#pin-button")!.addEventListener("click", togglePin);
-  document.querySelector<HTMLButtonElement>("#hide-button")!.addEventListener("click", () => invoke("hide_window"));
-  document.querySelector<HTMLButtonElement>("#clear-completed")?.addEventListener("click", clearCompleted);
-  document.querySelector<HTMLElement>(".window-drag-region")!.addEventListener("mousedown", (event) => {
-    if (event.button !== 0 || (event.target as Element).closest("button")) return;
-    void invoke("start_dragging");
-  });
-  document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => handleTodoAction(button.dataset.action!, button.dataset.id!, button.dataset.relatedId));
-  });
-  document.querySelectorAll<HTMLFormElement>(".dependency-form").forEach((form) => {
-    form.addEventListener("submit", addDependency);
-  });
-  document.querySelectorAll<HTMLSelectElement>(".dependency-select").forEach((select) => {
-    select.addEventListener("change", () => linkExisting(select));
-  });
-  document.querySelectorAll<HTMLElement>(".todo").forEach((todo) => {
-    todo.addEventListener("pointerdown", startTodoDrag);
-    todo.addEventListener("pointermove", moveTodoDrag);
-    todo.addEventListener("pointerup", endTodoDrag);
-    todo.addEventListener("pointercancel", cancelTodoDrag);
-  });
-  document.querySelector<HTMLElement>("#todo-list")!.scrollTop = scrollTop;
-}
-
-function todoTemplate(todo: Todo) {
-  const prerequisites = todos.filter((item) => todo.prerequisiteIds.includes(item.id));
-  const next = todos.filter((item) => item.prerequisiteIds.includes(todo.id));
-  const blocked = isBlocked(todo, todos);
-  const expanded = expandedId === todo.id;
-  const waiting = prerequisites.filter((item) => !item.completed);
-  return `<article class="todo ${todo.completed ? "is-completed" : ""} ${blocked ? "is-blocked" : ""} ${expanded ? "is-expanded" : ""}" data-id="${escapeHtml(todo.id)}">
-    <div class="todo-row">
-      <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${escapeHtml(todo.id)}" ${blocked ? "disabled" : ""} aria-label="${blocked ? "请先完成前置任务" : todo.completed ? "标记未完成" : "标记完成"}">${todo.completed ? "✓" : ""}</button>
-      <div class="todo-content"><span class="todo-title">${escapeHtml(todo.title)}</span>
-        <span class="todo-meta">${blocked ? `◌ 等待 ${waiting.length} 个前置任务` : todo.completed ? "已完成" : "可以开始"}${next.length ? ` · ${next.length} 个后续` : ""}</span></div>
-      <button class="details-button" data-action="expand" data-id="${escapeHtml(todo.id)}" aria-label="${expanded ? "收起" : "管理"}任务步骤" aria-expanded="${expanded}">${expanded ? "⌃" : "⌄"}</button>
-      <button class="delete" data-action="delete" data-id="${escapeHtml(todo.id)}" aria-label="删除任务">×</button>
     </div>
-    ${expanded ? `<div class="dependencies">${dependencySection(todo, prerequisites, "before")}${dependencySection(todo, next, "after")}</div>` : ""}
-  </article>`;
-}
-
-function dependencySection(todo: Todo, related: Todo[], direction: "before" | "after") {
-  const before = direction === "before";
-  const candidates = todos.filter((item) => before ? canLink(item.id, todo.id, todos) : canLink(todo.id, item.id, todos));
-  const id = escapeHtml(todo.id);
-  return `<section class="dependency-section">
-    <div class="dependency-heading"><span>${before ? "上一步" : "下一步"}</span><span>${before ? "全部完成后解锁" : "完成后解锁"}</span></div>
-    <div class="dependency-items">${related.length ? related.map((item) => `<div class="dependency-item"><span class="dependency-dot ${item.completed ? "done" : ""}"></span><span title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</span><button data-action="unlink-${direction}" data-id="${id}" data-related-id="${escapeHtml(item.id)}" aria-label="移除与 ${escapeHtml(item.title)} 的关联">×</button></div>`).join("") : `<span class="dependency-empty">${before ? "没有前置任务" : "没有后续任务"}</span>`}</div>
-    <select class="dependency-select" data-id="${id}" data-direction="${direction}" aria-label="关联已有${before ? "上一步" : "下一步"}"><option value="">＋ 关联已有任务</option>${candidates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.title)}</option>`).join("")}</select>
-    <form class="dependency-form" data-id="${id}" data-direction="${direction}"><input aria-label="新建${before ? "上一步" : "下一步"}" placeholder="新建${before ? "上一步" : "下一步"}…" maxlength="200"><button type="submit">添加</button></form>
   </section>`;
 }
 
-function startTodoDrag(event: PointerEvent) {
-  if (event.button !== 0 || (event.target as Element).closest("button, input, select, .dependencies")) return;
-  const todo = event.currentTarget as HTMLElement;
-  taskDrag = {
-    id: todo.dataset.id!,
-    source: todo,
-    pointerId: event.pointerId,
-    startX: event.clientX,
-    startY: event.clientY,
-    active: false,
-    target: null,
-    insertAfter: false,
-  };
-  todo.setPointerCapture(event.pointerId);
-}
-
-function moveTodoDrag(event: PointerEvent) {
-  if (!taskDrag || event.pointerId !== taskDrag.pointerId) return;
-  const distance = Math.hypot(event.clientX - taskDrag.startX, event.clientY - taskDrag.startY);
-  if (!taskDrag.active && distance < 5) return;
-  if (!taskDrag.active) {
-    taskDrag.active = true;
-    taskDrag.source.classList.add("is-dragging");
+function render() {
+  const listScroll = document.querySelector(".list")?.scrollTop ?? 0;
+  const pending = board.todos.filter((todo) => !todo.completed);
+  const available = pending.filter((todo) => groupReady(board, todo.groupId)).length;
+  const completed = board.todos.length - pending.length;
+  // Each prerequisite gets one full rendering; other successors point to it.
+  const owner = new Map<string, string>();
+  for (const group of board.groups) for (const id of group.prerequisiteIds) {
+    if (!owner.has(id)) owner.set(id, group.id);
   }
-
-  event.preventDefault();
-  const candidate = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>(".todo");
-  if (taskDrag.target && taskDrag.target !== candidate) {
-    taskDrag.target.classList.remove("is-drag-over");
-    delete taskDrag.target.dataset.dropPosition;
-  }
-  if (!candidate || candidate === taskDrag.source) {
-    taskDrag.target = null;
-    return;
-  }
-
-  const bounds = candidate.getBoundingClientRect();
-  taskDrag.target = candidate;
-  taskDrag.insertAfter = event.clientY > bounds.top + bounds.height / 2;
-  candidate.dataset.dropPosition = taskDrag.insertAfter ? "after" : "before";
-  candidate.classList.add("is-drag-over");
+  const roots = board.groups.filter((group) => !owner.has(group.id));
+  app.innerHTML = `<section class="shell">
+    <div class="window-drag-region" aria-label="拖动窗口"></div>
+    <header class="controls"><div><strong>Zen Todo</strong><span class="status">${pending.length ? `${available} 项可做${pending.length > available ? ` · ${pending.length - available} 项等待` : ""}` : completed ? "全部完成" : "一步一步，慢慢来"}</span></div>
+      <div class="window-actions"><button class="icon-button" id="organize-button" title="一键整理" aria-label="一键整理">${icon("organize")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="${pinned ? "取消置顶" : "置顶窗口"}">⌃</button><button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button></div>
+    </header>
+    <div class="list" id="todo-list">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
+      <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> 新建分组</button>
+    </div>
+    <footer class="footer"><span>${board.groups.length} 组 · ${pending.length} 项待完成</span>${completed ? `<button id="clear-completed">清除已完成 · ${completed}</button>` : "<span>保持专注</span>"}</footer>
+    <div class="notice ${message ? "visible" : ""}" role="status">${escapeHtml(message)}</div>
+  </section>`;
+  bindEvents();
+  document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
+  document.querySelector(".list")!.scrollTop = listScroll;
 }
 
-async function endTodoDrag(event: PointerEvent) {
-  if (!taskDrag || event.pointerId !== taskDrag.pointerId || event.currentTarget !== taskDrag.source) return;
-  const drag = taskDrag;
-  clearTodoDrag();
-  if (!drag.active || !drag.target) return;
-
-  const sourceIndex = todos.findIndex((todo) => todo.id === drag.id);
-  const targetIndex = todos.findIndex((todo) => todo.id === drag.target!.dataset.id);
-  if (sourceIndex < 0 || targetIndex < 0) return;
-
-  const [movedTodo] = todos.splice(sourceIndex, 1);
-  let insertIndex = targetIndex;
-  if (sourceIndex < targetIndex) insertIndex -= 1;
-  if (drag.insertAfter) insertIndex += 1;
-  todos.splice(insertIndex, 0, movedTodo);
-  await persist();
-  render();
+function resizeTodo(input: HTMLTextAreaElement) {
+  input.style.height = "auto";
+  input.style.height = `${input.scrollHeight}px`;
 }
 
-function cancelTodoDrag(event: PointerEvent) {
-  if (!taskDrag || event.pointerId !== taskDrag.pointerId) return;
-  clearTodoDrag();
-}
-
-function clearTodoDrag() {
-  taskDrag = null;
-  document.querySelectorAll(".is-dragging, .is-drag-over").forEach((todo) => {
-    todo.classList.remove("is-dragging", "is-drag-over");
-    delete (todo as HTMLElement).dataset.dropPosition;
+function openComposer(groupId: string, mode: "task" | "previous" | "next") {
+  void change(() => {
+    board.groups.find((group) => group.id === groupId)!.collapsed = false;
+    composer = { groupId, mode };
+  }).then(() => {
+    document.querySelector<HTMLElement>("#step-input, .inline-form .create-step")?.focus();
+    document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
   });
 }
 
-async function addTodo(event: SubmitEvent) {
-  event.preventDefault();
-  const input = document.querySelector<HTMLInputElement>("#todo-input")!;
-  const title = input.value.trim();
-  if (!title) return;
-  todos.unshift({ id: crypto.randomUUID(), title, completed: false, createdAt: Date.now(), prerequisiteIds: [] });
-  await persist();
-  render();
-  document.querySelector<HTMLInputElement>("#todo-input")?.focus();
-}
-
-async function handleTodoAction(action: string, id: string, relatedId?: string) {
-  const todo = todos.find((item) => item.id === id);
-  if (!todo) return;
-  if (action === "expand") {
-    expandedId = expandedId === id ? null : id;
-    render();
+function handleAction(button: HTMLButtonElement) {
+  const { action, id = "", group: groupId = "" } = button.dataset;
+  if (action === "close-composer") { composer = null; render(); return; }
+  if (action === "task" || action === "previous" || action === "next") { openComposer(id, action); return; }
+  if (action === "jump") {
+    void change(() => { board.groups.find((group) => group.id === id)!.collapsed = false; }).then(() => {
+      const target = document.getElementById(`group-${id}`);
+      target?.querySelector(":scope > .group-body")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      document.getElementById(`fold-${id}`)?.focus({ preventScroll: true });
+      requestAnimationFrame(() => target?.classList.add("highlight"));
+    });
     return;
   }
-  if (action === "toggle") {
-    if (!todo.completed && isBlocked(todo, todos)) return;
-    todo.completed = !todo.completed;
-    reconcile(todos);
-  } else if (action === "delete") {
-    todos = removeTodos(todos, new Set([id]));
-    if (expandedId === id) expandedId = null;
-  } else if (action === "unlink-before" && relatedId) {
-    todo.prerequisiteIds = todo.prerequisiteIds.filter((item) => item !== relatedId);
-  } else if (action === "unlink-after" && relatedId) {
-    const next = todos.find((item) => item.id === relatedId);
-    if (next) next.prerequisiteIds = next.prerequisiteIds.filter((item) => item !== id);
-  } else return;
-  await persist();
-  render();
+  void change(() => {
+    if (action === "fold") {
+      const group = board.groups.find((group) => group.id === id)!;
+      group.collapsed = !group.collapsed;
+      if (group.collapsed && composer?.groupId === id) composer = null;
+    } else if (action === "create-previous" || action === "create-next") {
+      const group = newGroup();
+      linkGroups(board, action === "create-previous" ? group.id : id, action === "create-previous" ? id : group.id);
+      composer = { groupId: group.id, mode: "task" };
+    } else if (action === "toggle") {
+      const reset = toggleTodo(board, id);
+      if (reset) message = `已撤销 ${reset} 项后续待办的完成状态`;
+    } else if (action === "delete-task") {
+      board.todos = board.todos.filter((todo) => todo.id !== id);
+    } else if (action === "delete-group") {
+      removeGroups(board, new Set([id]));
+      if (composer?.groupId === id) composer = null;
+    } else if (action === "unlink") {
+      const group = board.groups.find((item) => item.id === groupId)!;
+      group.prerequisiteIds = group.prerequisiteIds.filter((previous) => previous !== id);
+    } else if (action === "link-previous" || action === "link-next") {
+      linkGroups(board, action === "link-previous" ? id : groupId, action === "link-previous" ? groupId : id);
+      composer = null;
+    }
+  }, action === "fold" ? `fold-${id}` : action === "create-previous" || action === "create-next" ? "step-input" : undefined).then(() => {
+    if (action === "create-previous" || action === "create-next") document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
+  });
 }
 
-async function linkExisting(select: HTMLSelectElement) {
-  const id = select.dataset.id!;
-  const relatedId = select.value;
-  const before = select.dataset.direction === "before";
-  const prerequisiteId = before ? relatedId : id;
-  const dependentId = before ? id : relatedId;
-  if (!canLink(prerequisiteId, dependentId, todos)) return;
-  todos.find((todo) => todo.id === dependentId)!.prerequisiteIds.push(prerequisiteId);
-  reconcile(todos);
-  await persist();
-  render();
+function bindEvents() {
+  document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
+    button.addEventListener("click", () => handleAction(button));
+  });
+  document.querySelector("#new-group-button")!.addEventListener("click", () => {
+    void change(() => {
+      const group = newGroup();
+      composer = { groupId: group.id, mode: "task" };
+    }, "step-input").then(() => document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" }));
+  });
+  document.querySelector<HTMLFormElement>("#step-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const title = document.querySelector<HTMLInputElement>("#step-input")!.value.trim();
+    if (!title || !composer) return;
+    const { groupId } = composer;
+    void change(() => {
+      newTodo(title, groupId);
+    }, "step-input").then(() => document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" }));
+  });
+  document.querySelectorAll<HTMLInputElement>("[data-rename]").forEach((input) => {
+    input.addEventListener("blur", () => {
+      const id = input.dataset.rename!;
+      const title = input.value.trim();
+      if (title === board.groups.find((group) => group.id === id)?.title) return;
+      void change(() => { board.groups.find((group) => group.id === id)!.title = title; }, undefined, false).then(() => {
+        if (document.activeElement !== input) input.value = board.groups.find((group) => group.id === id)?.title ?? "";
+        document.getElementById(`group-${id}`)?.setAttribute("aria-label", name(id));
+        document.querySelectorAll<HTMLElement>("[data-group-label]").forEach((label) => { label.textContent = name(label.dataset.groupLabel!); });
+      });
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        input.value = board.groups.find((group) => group.id === input.dataset.rename)?.title ?? "";
+        input.blur();
+      }
+    });
+  });
+  document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach((input) => {
+    input.addEventListener("input", () => resizeTodo(input));
+    input.addEventListener("blur", () => {
+      const id = input.dataset.editTodo!;
+      const todo = board.todos.find((item) => item.id === id);
+      if (!todo) return;
+      const title = input.value.replace(/[\r\n]+/g, " ").trim();
+      if (!title || title === todo.title) { input.value = todo.title; resizeTodo(input); return; }
+      // Keep the DOM intact so saving on blur doesn't swallow the next click.
+      void change(() => { board.todos.find((item) => item.id === id)!.title = title; }, undefined, false).then(() => {
+        const saved = board.todos.find((item) => item.id === id);
+        if (!saved) return;
+        if (document.activeElement !== input) input.value = saved.title;
+        input.setAttribute("aria-label", `编辑待办：${saved.title}`);
+        const row = input.closest(".todo")!;
+        row.querySelector(".check")?.setAttribute("aria-label", `${saved.completed ? "撤销完成" : "完成"}：${saved.title}`);
+        row.querySelector(".delete")?.setAttribute("aria-label", `删除 ${saved.title}`);
+        resizeTodo(input);
+      });
+    });
+    input.addEventListener("keydown", (event) => {
+      if (event.isComposing) return;
+      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        input.value = board.todos.find((todo) => todo.id === input.dataset.editTodo)?.title ?? "";
+        input.blur();
+      }
+    });
+  });
+  document.querySelector("#clear-completed")?.addEventListener("click", () => {
+    void change(() => { clearCompleted(board); composer = null; });
+  });
+  document.querySelector("#organize-button")!.addEventListener("click", () => {
+    void change(() => {
+      for (const group of board.groups) {
+        group.collapsed = groupComplete(board, group.id) || !groupReady(board, group.id);
+      }
+      if (composer && board.groups.find((group) => group.id === composer!.groupId)?.collapsed) composer = null;
+    }, "organize-button");
+  });
+  document.querySelector("#pin-button")!.addEventListener("click", async () => {
+    try {
+      if (isTauri()) await invoke("set_always_on_top", { value: !pinned });
+      pinned = !pinned;
+      render();
+    } catch { message = "无法更改置顶状态"; render(); }
+  });
+  document.querySelector("#hide-button")!.addEventListener("click", () => {
+    if (isTauri()) void invoke("hide_window").catch(() => { message = "无法隐藏窗口"; render(); });
+  });
+  document.querySelector(".window-drag-region")!.addEventListener("pointerdown", (event) => {
+    if ((event as PointerEvent).button === 0 && isTauri()) void invoke("start_dragging").catch(console.error);
+  });
+  document.querySelectorAll<HTMLElement>("[data-drag]").forEach((handle) => {
+    handle.addEventListener("dragstart", (event) => {
+      draggedId = handle.dataset.drag!;
+      event.dataTransfer?.setData("text/plain", draggedId);
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+      handle.closest(".todo")?.classList.add("is-dragging");
+    });
+    handle.addEventListener("dragend", () => { draggedId = null; document.querySelectorAll(".is-dragging, .drop-target").forEach((node) => node.classList.remove("is-dragging", "drop-target")); });
+  });
+  document.querySelectorAll<HTMLElement>("[data-todo]").forEach((row) => {
+    row.addEventListener("dragover", (event) => {
+      const source = board.todos.find((todo) => todo.id === draggedId);
+      const target = board.todos.find((todo) => todo.id === row.dataset.todo);
+      if (!source || source.id === target?.id || source.groupId !== target?.groupId) return;
+      event.preventDefault();
+      row.classList.add("drop-target");
+    });
+    row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+    row.addEventListener("drop", (event) => {
+      event.preventDefault();
+      const source = board.todos.find((todo) => todo.id === draggedId);
+      const target = board.todos.find((todo) => todo.id === row.dataset.todo);
+      if (!source || !target || source.id === target.id || source.groupId !== target.groupId) return;
+      const after = event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
+      void change(() => {
+        board.todos.splice(board.todos.indexOf(source), 1);
+        board.todos.splice(board.todos.indexOf(target) + (after ? 1 : 0), 0, source);
+      });
+    });
+  });
 }
 
-async function addDependency(event: SubmitEvent) {
-  event.preventDefault();
-  const form = event.currentTarget as HTMLFormElement;
-  const input = form.querySelector<HTMLInputElement>("input")!;
-  const title = input.value.trim();
-  const parent = todos.find((todo) => todo.id === form.dataset.id);
-  if (!title || !parent) return;
-  const before = form.dataset.direction === "before";
-  const newTodo: Todo = { id: crypto.randomUUID(), title, completed: false, createdAt: Date.now(), prerequisiteIds: before ? [] : [parent.id] };
-  if (before) parent.prerequisiteIds.push(newTodo.id);
-  const index = todos.indexOf(parent);
-  todos.splice(before ? index : index + 1, 0, newTodo);
-  reconcile(todos);
-  await persist();
-  render();
-  document.querySelector<HTMLInputElement>(`.dependency-form[data-direction="${before ? "before" : "after"}"] input`)?.focus();
-}
+document.addEventListener("keydown", (event) => {
+  if (event.isComposing) return;
+  if (event.key === "Escape") { composer = null; render(); }
+});
 
-async function clearCompleted() {
-  todos = removeTodos(todos, new Set(todos.filter((todo) => todo.completed).map((todo) => todo.id)));
-  if (!todos.some((todo) => todo.id === expandedId)) expandedId = null;
-  await persist();
-  render();
-}
-
-async function togglePin() {
-  pinned = !pinned;
-  await invoke("set_always_on_top", { value: pinned });
-  render();
-}
+window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
 
 async function start() {
-  todos = (await invoke<Todo[]>("load_todos")).map((todo) => ({ ...todo, prerequisiteIds: todo.prerequisiteIds ?? [] }));
-  reconcile(todos);
+  board = isTauri() ? await invoke<Board>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? '{"groups":[],"todos":[]}');
+  reconcile(board);
   render();
 }
 
 start().catch((error) => {
   console.error(error);
-  app.innerHTML = `<section class="shell error"><strong>无法读取任务</strong><p>请重启应用后再试。</p></section>`;
+  app.innerHTML = `<section class="shell error"><strong>无法读取待办</strong><p>请检查数据文件后重启应用。</p></section>`;
 });
