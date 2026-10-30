@@ -2,11 +2,11 @@
 * { box-sizing: border-box; }
 html, body, #app { height: 100%; }
 body { margin: 0; min-width: 300px; overflow: hidden; }
-button, input { font: inherit; }
+button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button { border: 0; background: transparent; color: inherit; }
 button:disabled { cursor: not-allowed; }
-button:focus-visible, input:focus-visible, [draggable]:focus-visible { outline: 2px solid #70836a; outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:focus-visible { outline: 2px solid #70836a; outline-offset: 2px; }
 .shell { position: relative; display: flex; height: 100%; flex-direction: column; padding: 9px 12px 10px; }
 .window-drag-region { flex: 0 0 5px; margin: -3px 0 9px; border-radius: 5px; background: #e3e4db; cursor: grab; }
 .controls { display: flex; align-items: center; justify-content: space-between; padding: 0 2px 11px; }
@@ -27,11 +27,9 @@ button:focus-visible, input:focus-visible, [draggable]:focus-visible { outline: 
 .group-name { min-width: 0; width: 100%; flex: 1; padding: 3px 2px; border: 1px solid transparent; border-radius: 3px; background: transparent; font-size: 11px; font-weight: 600; color: #68755f; text-overflow: ellipsis; }
 .group-name:hover { border-color: #dce1d2; }
 .group-name:focus { background: #fff; }
+.group-name::placeholder { opacity: 0; }
+.group-name:hover::placeholder, .group-name:focus::placeholder { opacity: 1; }
 .group-count { color: #989e90; font-size: 10px; font-variant-numeric: tabular-nums; }
-.group-menu-button { height: 22px; width: 23px; flex: 0 0 auto; border-radius: 4px; color: #969c8c; font-size: 18px; line-height: 1; }
-.group-menu-button:hover, .group-menu-button.selected { background: #e9eddf; color: #526848; }
-.group-add-button { height: 22px; width: 19px; flex: 0 0 auto; border-radius: 4px; padding: 0; color: #969c8c; font-size: 13px; }
-.group-add-button:hover { background: #e9eddf; color: #526848; }
 .tasks { padding: 1px 0; }
 .todo { display: flex; gap: 7px; min-height: 30px; align-items: center; padding: 3px 1px; border-radius: 3px; }
 .todo:hover { background: #f1f3e9; }
@@ -40,7 +38,8 @@ button:focus-visible, input:focus-visible, [draggable]:focus-visible { outline: 
 .check { display: grid; place-items: center; border: 1.3px solid #b6beaa; border-radius: 3px; width: 15px; height: 15px; flex: 0 0 auto; padding: 0; color: white; font-size: 11px; }
 .check:hover:not(:disabled) { border-color: #657d55; background: #e8eddf; }
 .check.checked { background: #7b8b6b; border-color: #7b8b6b; }
-.todo-title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.todo-title { display: block; flex: 1; width: 100%; min-width: 0; padding: 0 2px; border: 0; border-radius: 2px; margin: 0; background: transparent; color: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; cursor: text; }
+.todo-title:focus { background: #fffef9; }
 .is-completed .todo-title { color: #9da28f; text-decoration: line-through; }
 .delete { opacity: 0; color: #9a9f90; font-size: 16px; padding: 0 3px; }
 .todo:hover .delete, .todo:focus-within .delete { opacity: 1; }
@@ -48,16 +47,15 @@ button:focus-visible, input:focus-visible, [draggable]:focus-visible { outline: 
 .is-blocked .todo-title { color: #979b92; }
 .is-blocked .check { background: #eeefe9; border-color: #d1d5c9; }
 .is-blocked .group-name { color: #8d9486; }
-.waiting { padding: 0 2px 3px; color: #8c9285; font-size: 10px; }
 .add-task { color: #939e86; font-size: 10px; padding: 5px 2px 3px; }
 .add-task:hover { color: #4f6d40; }
-.group-tools { display: flex; flex-wrap: wrap; gap: 3px; padding: 5px 0; border-bottom: 1px solid #e9ecdf; margin-bottom: 3px; }
-.group-tools button { padding: 4px 5px; border-radius: 3px; background: #edf0e5; color: #6a795e; font-size: 10px; }
+.group-tools { display: flex; flex-shrink: 0; gap: 2px; }
+.group-tools button { display: grid; width: 23px; height: 23px; padding: 4px; place-items: center; border-radius: 3px; color: #7b886e; }
+.group-tools svg { display: block; width: 15px; height: 15px; }
 .group-tools button:hover { background: #e0e7d6; }
 .group-tools .danger { background: transparent; color: #a17b70; }
-.group-tools .unlink { flex-basis: 100%; text-align: left; overflow-wrap: anywhere; }
 .shared-step { display: flex; align-items: center; gap: 5px; width: 100%; padding: 7px; text-align: left; font-size: 11px; color: #7e8971; }
-.shared-step span { margin-left: auto; padding-left: 5px; font-size: 9px; color: #929b86; flex-shrink: 0; }
+.shared-step .shared-caption { margin-left: auto; padding-left: 5px; font-size: 9px; color: #929b86; flex-shrink: 0; }
 .shared-step:hover { background: #e5ebda; }
 .shared-step.is-done { color: #698456; }
 .inline-form { padding: 6px; margin: 5px 0 1px; background: #f0f3e8; border: 1px solid #e0e6d4; border-radius: 4px; }
@@ -66,15 +64,16 @@ button:focus-visible, input:focus-visible, [draggable]:focus-visible { outline: 
 .input-line { display: flex; gap: 5px; }
 .input-line input { flex: 1; width: 100%; min-width: 0; border: 1px solid #d7dfca; border-radius: 3px; padding: 5px; background: #fffef9; color: #424a3a; font-size: 12px; }
 .input-line button { flex: 0 0 auto; padding: 4px 7px; background: #748664; border-radius: 3px; color: #fff; font-size: 10px; }
+.create-step { width: 100%; padding: 7px; border: 1px dashed #c3cfb3; border-radius: 3px; text-align: left; color: #60734e; font-size: 11px; }
+.create-step:hover { background: #e1e8d5; }
 .hint { font-size: 10px; color: #8a937d; line-height: 1.5; margin: 6px 0 0; }
 .existing { margin-top: 8px; max-height: 145px; overflow-y: auto; }
 .existing > span { display: block; color: #8a937d; font-size: 10px; margin-bottom: 3px; }
 .existing button { display: flex; justify-content: space-between; gap: 5px; width: 100%; padding: 6px 2px; text-align: left; color: #60734e; font-size: 11px; overflow-wrap: anywhere; }
 .existing button:hover { background: #e1e8d5; }
-.new-group-form { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px dashed #cdd3c0; border-radius: 3px; color: #889579; }
-.new-group-form input { flex: 1; width: 100%; min-width: 0; border: 0; background: transparent; outline-offset: 3px; font-size: 11px; color: #4c5941; }
+.new-group-button { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px; border: 1px dashed #cdd3c0; border-radius: 3px; color: #889579; font-size: 11px; text-align: left; }
+.new-group-button:hover { background: #edf0e5; color: #60734e; }
 input::placeholder { color: #a1a894; }
-.new-group-form button { font-size: 10px; color: #718260; padding: 3px; }
 .footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; min-height: 22px; margin-top: 5px; color: #969d89; font-size: 10px; }
 .footer button { color: #808d72; font-size: 10px; padding: 3px 0; }
 .footer button:hover { color: #4f6d40; }
