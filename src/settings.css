@@ -6,6 +6,7 @@
 .settings-category { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px; border-radius: 6px; text-align: left; color: #5f7552; font-size: 12px; }
 .settings-category.is-selected { background: #e0e8d6; font-weight: 600; }
 .settings-category:hover { background: #d9e3cd; }
+.settings-category + .settings-category { margin-top: 4px; }
 .settings-autosave { display: flex; align-items: flex-start; gap: 6px; margin-top: auto; padding: 0 7px; color: #8e9b82; font-size: 10px; line-height: 1.6; }
 .settings-autosave .lucide { width: 12px; height: 16px; }
 .settings-main { min-width: 0; overflow-y: auto; padding: 27px 30px; }
@@ -32,7 +33,13 @@
   .settings-card { padding: 13px; }
   .setting-row { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
-.encryption-form { display: grid; gap: 12px; }
-.encryption-form label { display: grid; gap: 5px; font-size: 13px; }
-.encryption-form input { padding: 8px; border: 1px solid #c8cebd; border-radius: 4px; background: #fffef9; }
-.encryption-form button { justify-self: start; padding: 8px 12px; border-radius: 4px; background: #748664; color: white; }
+.setting-message { margin: 0; }
+.encryption-status { display: flex; align-items: center; gap: 6px; margin: 16px 0 12px; color: #607752; font-size: 11px; font-weight: 600; }
+.encryption-status .lucide { width: 14px; height: 14px; }
+.setting-checkbox { display: flex; align-items: center; gap: 8px; color: #526648; font-size: 12px; cursor: pointer; }
+.setting-checkbox input { width: 14px; height: 14px; margin: 0; accent-color: #748664; }
+.encryption-form { display: grid; gap: 12px; margin-top: 16px; }
+.encryption-form label { display: grid; gap: 6px; color: #526648; font-size: 12px; }
+.encryption-form input { width: 100%; padding: 8px; border: 1px solid #cfd9c2; border-radius: 5px; background: #f6f8f0; color: #3d4a35; font-size: 12px; }
+.encryption-form button { justify-self: start; padding: 8px 12px; border-radius: 5px; background: #748664; color: white; font-size: 12px; }
+.encryption-form button:hover:not(:disabled) { background: #607752; }

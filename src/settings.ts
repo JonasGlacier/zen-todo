@@ -10,6 +10,8 @@ let saving = false;
 let failed = false;
 let vault: { encrypted: boolean; locked: boolean; lockOnHide: boolean; legacyTemp: boolean } | null = null;
 let vaultError = "";
+let vaultLoadFailed = false;
+let category: "general" | "privacy" = "general";
 document.body.classList.add("settings-window");
 
 function render() {
@@ -19,22 +21,27 @@ function render() {
   app.innerHTML = `<div class="settings-layout">
     <aside class="settings-sidebar">
       <div class="settings-brand">${icon("settings")}<span>Zen Todo</span></div>
-      <nav aria-label="${t("settingsNavigation")}"><button class="settings-category is-selected" aria-current="page">${icon("general")}<span>${t("general")}</span></button></nav>
+      <nav aria-label="${t("settingsNavigation")}">${(["general", "privacy"] as const).map((item) => `<button class="settings-category ${category === item ? "is-selected" : ""}" data-category="${item}" ${category === item ? 'aria-current="page"' : ""}>${icon(item)}<span>${t(item)}</span></button>`).join("")}</nav>
       <div class="settings-autosave">${icon("check")}<span>${t("savedAutomatically")}</span></div>
     </aside>
     <section class="settings-main">
       <header class="settings-page-header"><div><h1>${t("settings")}</h1><p>${t("settingsDescription")}</p></div><button class="settings-close" id="close-settings" title="${t("closeSettings")}" aria-label="${t("closeSettings")}">${icon("close")}</button></header>
-      <section class="settings-section" aria-labelledby="general-title"><h2 id="general-title">${t("general")}</h2><p class="section-description">${t("generalDescription")}</p>
+      ${category === "general" ? `<section class="settings-section" aria-labelledby="general-title"><h2 id="general-title">${t("general")}</h2><p class="section-description">${t("generalDescription")}</p>
         <div class="settings-card"><div class="setting-row"><div class="setting-label">${icon("language")}<label for="language-select">${t("language")}</label></div><select id="language-select" ${saving ? "disabled" : ""}><option value="zh-CN" lang="zh-CN" ${getLanguage() === "zh-CN" ? "selected" : ""}>简体中文</option><option value="en" lang="en" ${getLanguage() === "en" ? "selected" : ""}>English</option></select></div>
           <p class="setting-description">${t("languageDescription")}</p><p class="setting-hint">${t("languageHint")}</p></div>
-      </section>
-      ${isTauri() && vault ? `<section class="settings-section"><h2>${t("encryption")}</h2><p class="section-description">${t("encryptionDescription")}</p><div class="settings-card">
-        ${vault.encrypted ? `<strong>${t("encryptionEnabled")}</strong><p><label><input id="lock-on-hide" type="checkbox" ${vault.lockOnHide ? "checked" : ""} ${saving ? "disabled" : ""}/> ${t("lockOnHide")}</label></p><p class="setting-hint">${t("lockOnHideHint")}</p>` : `<form id="encryption-form" class="encryption-form"><label>${t("password")}<input type="password" id="password" autocomplete="new-password" required /></label><label>${t("confirmPassword")}<input type="password" id="confirm-password" autocomplete="new-password" required /></label><button type="submit" ${saving ? "disabled" : ""}>${t("enableEncryption")}</button></form>`}
-        ${vault.legacyTemp ? `<p class="settings-error">${t("legacyTempWarning")}</p>` : ""}<p class="settings-error" role="status">${vaultError}</p></div></section>` : ""}
-      <p class="settings-error" role="status">${failed ? t("settingsFailed") : ""}</p>
+      </section><p class="settings-error" role="status">${failed ? t("settingsFailed") : ""}</p>` : `<section class="settings-section" aria-labelledby="privacy-title"><h2 id="privacy-title">${t("privacy")}</h2><p class="section-description">${t("privacyDescription")}</p>
+        ${isTauri() && vault ? `<div class="settings-card"><div class="setting-label">${icon("privacy")}<span>${t("encryption")}</span></div><p class="setting-description">${t("encryptionDescription")}</p>
+          ${vault.encrypted ? `<p class="encryption-status">${icon("check")}${t("encryptionEnabled")}</p><label class="setting-checkbox"><input id="lock-on-hide" type="checkbox" ${vault.lockOnHide ? "checked" : ""} ${saving ? "disabled" : ""}/><span>${t("lockOnHide")}</span></label><p class="setting-hint">${t("lockOnHideHint")}</p>` : `<form id="encryption-form" class="encryption-form"><label>${t("password")}<input type="password" id="password" autocomplete="new-password" required /></label><label>${t("confirmPassword")}<input type="password" id="confirm-password" autocomplete="new-password" required /></label><button type="submit" ${saving ? "disabled" : ""}>${t("enableEncryption")}</button></form>`}
+          ${vault.legacyTemp ? `<p class="settings-error">${t("legacyTempWarning")}</p>` : ""}<p class="settings-error" role="status">${vaultError}</p></div>` : `<div class="settings-card"><p class="setting-description setting-message">${!isTauri() ? t("privacyDesktopOnly") : vaultLoadFailed ? t("privacyLoadFailed") : t("privacyLoading")}</p></div>`}</section>`}
     </section>
   </div>`;
-  document.querySelector<HTMLSelectElement>("#language-select")!.addEventListener("change", (event) => {
+  document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach((button) => button.addEventListener("click", () => {
+    if (saving) return;
+    category = button.dataset.category === "privacy" ? "privacy" : "general";
+    render();
+    document.querySelector<HTMLButtonElement>(`[data-category="${category}"]`)?.focus();
+  }));
+  document.querySelector<HTMLSelectElement>("#language-select")?.addEventListener("change", (event) => {
     const value = (event.target as HTMLSelectElement).value;
     if (value === "en" || value === "zh-CN") void changeLanguage(value);
   });
@@ -97,5 +104,5 @@ document.addEventListener("keydown", (event) => {
 void watchSettings(render).then((dispose) => {
   window.addEventListener("pagehide", dispose, { once: true });
   render();
-  if (isTauri()) void invoke<typeof vault>("vault_status").then((status) => { vault = status; render(); }).catch(console.error);
+  if (isTauri()) void invoke<typeof vault>("vault_status").then((status) => { vault = status; render(); }).catch((error) => { console.error(error); vaultLoadFailed = true; render(); });
 });

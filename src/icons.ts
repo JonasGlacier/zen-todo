@@ -1,7 +1,7 @@
 import {
   ArrowDownToLine, ArrowUpRight, ArrowUpToLine, Check, ChevronRight,
   GripVertical, Languages, ListFilter, ListPlus, ListTodo, Minus,
-  Pin, PinOff, Plus, Settings, SlidersHorizontal, Trash2, X, createElement,
+  Pin, PinOff, Plus, Settings, ShieldCheck, SlidersHorizontal, Trash2, X, createElement,
 } from "lucide";
 
 const icons = {
@@ -9,7 +9,7 @@ const icons = {
   delete: Trash2, chevron: ChevronRight, organize: ListFilter, settings: Settings,
   pin: Pin, pinOff: PinOff, hide: Minus, plus: Plus, close: X, check: Check,
   grip: GripVertical, jump: ArrowUpRight, empty: ListTodo,
-  general: SlidersHorizontal, language: Languages,
+  general: SlidersHorizontal, language: Languages, privacy: ShieldCheck,
 };
 const cache = new Map<keyof typeof icons, string>();
 

@@ -27,7 +27,7 @@ const zh = {
   settings: "设置", closeSettings: "关闭设置", general: "通用", language: "语言", languageHint: "切换后立即生效，并自动保存。",
   settingsFailed: "无法保存语言设置，请重试。",
   openSettingsFailed: "无法打开设置窗口，请重试。", settingsDescription: "按你的习惯，调整 Zen Todo。",
-  settingsNavigation: "设置分类", generalDescription: "管理应用的语言和通用偏好。",
+  settingsNavigation: "设置分类", generalDescription: "管理应用的语言和通用偏好。", privacy: "隐私", privacyDescription: "管理本地数据的加密和锁定。", privacyDesktopOnly: "本地数据加密仅在桌面应用中可用。", privacyLoading: "正在读取加密状态…", privacyLoadFailed: "无法读取加密状态，请重新打开设置。",
   languageDescription: "选择界面使用的语言，不会修改你的待办内容。", savedAutomatically: "设置会自动保存",
   encryption: "本地数据加密", encryptionDescription: "使用独立密码加密待办。忘记密码后无法恢复数据，请妥善保管。", encryptionEnabled: "加密已开启", password: "加密密码", confirmPassword: "再次输入密码", enableEncryption: "开启加密", passwordMismatch: "请输入相同的非空密码。", encryptionFailed: "操作失败，请重试并检查数据文件。", lockOnHide: "隐藏到托盘时锁定", lockOnHideHint: "关闭时仅在退出应用后锁定；开启后每次隐藏都需要重新输入密码。", unlock: "解锁", unlockTitle: "解锁待办", unlockHint: "请输入你的加密密码。", unlockFailed: "密码错误或数据已损坏。", legacyTempWarning: "发现旧版临时文件 todos.json.tmp，可能包含明文；请检查数据目录并自行处理。",
 };
@@ -55,7 +55,7 @@ const en: Record<keyof typeof zh, string> = {
   settings: "Settings", closeSettings: "Close settings", general: "General", language: "Language", languageHint: "Applies immediately and saves automatically.",
   settingsFailed: "Couldn't save the language setting. Please try again.",
   openSettingsFailed: "Couldn't open settings. Please try again.", settingsDescription: "Make Zen Todo feel like home.",
-  settingsNavigation: "Settings categories", generalDescription: "Manage your language and general preferences.",
+  settingsNavigation: "Settings categories", generalDescription: "Manage your language and general preferences.", privacy: "Privacy", privacyDescription: "Manage local data encryption and locking.", privacyDesktopOnly: "Local data encryption is available in the desktop app.", privacyLoading: "Loading encryption status…", privacyLoadFailed: "Couldn't load encryption status. Please reopen settings.",
   languageDescription: "Choose the interface language. Your tasks stay as they are.", savedAutomatically: "Settings save automatically",
   encryption: "Local data encryption", encryptionDescription: "Protect tasks with a separate password. Lost passwords cannot be recovered.", encryptionEnabled: "Encryption enabled", password: "Encryption password", confirmPassword: "Confirm password", enableEncryption: "Enable encryption", passwordMismatch: "Enter matching, non-empty passwords.", encryptionFailed: "Operation failed. Check the data file and try again.", lockOnHide: "Lock when hidden to tray", lockOnHideHint: "When off, lock only on exit; when on, hiding requires a password to reopen.", unlock: "Unlock", unlockTitle: "Unlock tasks", unlockHint: "Enter your encryption password.", unlockFailed: "Incorrect password or damaged data.", legacyTempWarning: "A legacy todos.json.tmp file exists and may contain plaintext; inspect it in the data directory.",
 };
