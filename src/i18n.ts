@@ -1,3 +1,6 @@
+import { isTauri } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
 export type Language = "zh-CN" | "en";
 export type Settings = { language: Language };
 
@@ -23,6 +26,9 @@ const zh = {
   loadFailed: "无法读取待办", loadFailedHint: "请检查数据文件后重启应用。",
   settings: "设置", closeSettings: "关闭设置", general: "通用", language: "语言", languageHint: "切换后立即生效，并自动保存。",
   settingsFailed: "无法保存语言设置，请重试。",
+  openSettingsFailed: "无法打开设置窗口，请重试。", settingsDescription: "按你的习惯，调整 Zen Todo。",
+  settingsNavigation: "设置分类", generalDescription: "管理应用的语言和通用偏好。",
+  languageDescription: "选择界面使用的语言，不会修改你的待办内容。", savedAutomatically: "设置会自动保存",
 };
 
 const en: Record<keyof typeof zh, string> = {
@@ -47,6 +53,9 @@ const en: Record<keyof typeof zh, string> = {
   loadFailed: "Couldn't load your tasks", loadFailedHint: "Check the data file, then restart the app.",
   settings: "Settings", closeSettings: "Close settings", general: "General", language: "Language", languageHint: "Applies immediately and saves automatically.",
   settingsFailed: "Couldn't save the language setting. Please try again.",
+  openSettingsFailed: "Couldn't open settings. Please try again.", settingsDescription: "Make Zen Todo feel like home.",
+  settingsNavigation: "Settings categories", generalDescription: "Manage your language and general preferences.",
+  languageDescription: "Choose the interface language. Your tasks stay as they are.", savedAutomatically: "Settings save automatically",
 };
 
 const settingsKey = "zen-todo-settings";
@@ -59,9 +68,38 @@ try {
 export function getLanguage(): Language { return settings.language; }
 
 export function setLanguage(language: Language) {
+  if (language === settings.language) return;
   const next = { ...settings, language };
   localStorage.setItem(settingsKey, JSON.stringify(next));
   settings = next;
+  window.dispatchEvent(new Event("zen-settings-changed"));
+}
+
+// storage covers browser windows; the native event also covers WebViews where
+// storage notifications can be delayed. Both paths deduplicate by language.
+export async function watchSettings(onChange: () => void): Promise<() => void> {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== settingsKey) return;
+    try {
+      const next = JSON.parse(event.newValue ?? "null");
+      if (next && (next.language === "en" || next.language === "zh-CN") && next.language !== settings.language) {
+        settings = next;
+        onChange();
+      }
+    } catch { /* Ignore incomplete or invalid settings from another window. */ }
+  };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener("zen-settings-changed", onChange);
+  const unlisten = isTauri() ? await listen<Language>("settings-changed", ({ payload }) => {
+    if (payload === "en" || payload === "zh-CN") {
+      try { setLanguage(payload); } catch (error) { console.error(error); }
+    }
+  }).catch(() => undefined) : undefined;
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener("zen-settings-changed", onChange);
+    unlisten?.();
+  };
 }
 
 export function t(key: keyof typeof zh, params: Record<string, string | number> = {}): string {

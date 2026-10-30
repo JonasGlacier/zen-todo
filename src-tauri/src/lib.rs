@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
-use tauri::{AppHandle, Manager, Runtime, WebviewWindow, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +91,34 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+#[tauri::command]
+async fn open_settings<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window.unminimize().map_err(|error| error.to_string())?;
+        window.show().map_err(|error| error.to_string())?;
+        return window.set_focus().map_err(|error| error.to_string());
+    }
+    let title = if language == "en" { "Settings · Zen Todo" } else { "设置 · Zen Todo" };
+    WebviewWindowBuilder::new(&app, "settings", WebviewUrl::App("index.html?view=settings".into()))
+        .title(title)
+        .inner_size(640.0, 480.0)
+        .min_inner_size(480.0, 360.0)
+        .resizable(true)
+        .decorations(true)
+        .center()
+        .parent(&main_window(&app)?).map_err(|error| error.to_string())?
+        .build().map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_settings<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("settings") {
+        window.close().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
 fn tray_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> Result<tauri::menu::Menu<R>, String> {
     let english = language == "en";
     tauri::menu::MenuBuilder::new(app)
@@ -107,7 +135,12 @@ fn set_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), S
         return Err("Unsupported language".to_string());
     }
     let tray = app.tray_by_id("main-tray").ok_or_else(|| "tray not found".to_string())?;
-    tray.set_menu(Some(tray_menu(&app, &language)?)).map_err(|error| error.to_string())
+    tray.set_menu(Some(tray_menu(&app, &language)?)).map_err(|error| error.to_string())?;
+    if let Some(window) = app.get_webview_window("settings") {
+        window.set_title(if language == "en" { "Settings · Zen Todo" } else { "设置 · Zen Todo" })
+            .map_err(|error| error.to_string())?;
+    }
+    app.emit("settings-changed", &language).map_err(|error| error.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -134,12 +167,14 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                api.prevent_close();
-                let _ = window.hide();
+            if window.label() == "main" {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, set_always_on_top, hide_window, start_dragging, set_language])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
         .run(tauri::generate_context!())
         .expect("error while running Zen Todo");
 }

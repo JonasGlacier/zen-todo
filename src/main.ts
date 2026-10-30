@@ -1,8 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
 import type { Board, Group, Todo, Workspace } from "./board";
-import { getLanguage, setLanguage, t } from "./i18n";
-import type { Language } from "./i18n";
+import { getLanguage, t, watchSettings } from "./i18n";
+import { icon } from "./icons";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -14,23 +14,13 @@ let pendingChange = Promise.resolve();
 let message = "";
 let composer: { groupId: string; mode: "task" | "previous" | "next" } | null = null;
 let draggedId: string | null = null;
-let settingsOpen = false;
+let settingsWindow: Window | null = null;
+let openingSettings = false;
 
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]!);
 const name = (id: string) => board.groups.find((group) => group.id === id)?.title || t("unnamedGroup");
-
-const icons = {
-  task: '<path d="M8 5h11M8 12h11M8 19h6M3 5h.01M3 12h.01M3 19h.01M19 16v6M16 19h6"/>',
-  previous: '<path d="m8 7 4-4 4 4M12 3v12M5 15v6h14v-6"/>',
-  next: '<path d="m8 17 4 4 4-4M12 21V9M5 9V3h14v6"/>',
-  delete: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
-  chevron: '<path d="m9 5 7 7-7 7"/>',
-  organize: '<path d="M4 5h9M4 12h13M4 19h9M18 2l1.2 3.8L23 7l-3.8 1.2L18 12l-1.2-3.8L13 7l3.8-1.2L18 2Z"/>',
-  settings: '<path d="m9 3 .7-1h4.6l.7 1 .4 2 1.8 1 1.9-.7 1.2.2 2.3 4-.4 1.2-1.6 1.3v2l1.6 1.3.4 1.2-2.3 4-1.2.2-1.9-.7-1.8 1-.4 2-.7 1H9.7L9 21l-.4-2-1.8-1-1.9.7-1.2-.2-2.3-4 .4-1.2L3.4 12v-2L1.8 8.7l-.4-1.2 2.3-4 1.2-.2 1.9.7 1.8-1L9 3Z" transform="translate(1 1) scale(.9)"/><circle cx="12" cy="12" r="3"/>',
-};
-const icon = (key: keyof typeof icons) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[key]}</svg>`;
 
 function newGroup(title = ""): Group {
   const group = { id: crypto.randomUUID(), title, prerequisiteIds: [], collapsed: false };
@@ -81,12 +71,12 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
 
 function todoTemplate(todo: Todo, ready: boolean) {
   return `<div class="todo ${todo.completed ? "is-completed" : ""}" data-todo="${todo.id}">
-    <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">⠿</span>
+    <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
     <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}"
       ${!ready ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
-      title="${ready ? "" : t("prerequisitesFirst")}">${todo.completed ? "✓" : ""}</button>
+      title="${ready ? "" : t("prerequisitesFirst")}">${todo.completed ? icon("check") : ""}</button>
     <textarea class="todo-title" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" rows="1" maxlength="200" spellcheck="false">${escapeHtml(todo.title)}</textarea>
-    <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">×</button>
+    <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
   </div>`;
 }
 
@@ -96,11 +86,11 @@ function composerTemplate(group: Group) {
   const candidates = mode === "task" ? [] : board.groups.filter((candidate) =>
     mode === "previous" ? canLink(board, candidate.id, group.id) : canLink(board, group.id, candidate.id));
   return `<${mode === "task" ? 'form id="step-form"' : "div"} class="inline-form" data-group="${group.id}" data-mode="${mode}">
-    <div class="composer-heading">${t(mode === "task" ? "addTodo" : mode === "previous" ? "addPrevious" : "addNext")}<button type="button" data-action="close-composer" aria-label="${t("cancel")}">×</button></div>
-    ${mode === "task" ? `<div class="input-line"><input id="step-input" aria-label="${t("todoName")}" placeholder="${t("todoPlaceholder")}" autocomplete="off" required maxlength="200"/><button type="submit">${t("add")}</button></div>` : `<button class="create-step" data-action="create-${mode}" data-id="${group.id}">＋ ${t("newGroup")}</button>`}
+    <div class="composer-heading">${t(mode === "task" ? "addTodo" : mode === "previous" ? "addPrevious" : "addNext")}<button type="button" data-action="close-composer" aria-label="${t("cancel")}">${icon("close")}</button></div>
+    ${mode === "task" ? `<div class="input-line"><input id="step-input" aria-label="${t("todoName")}" placeholder="${t("todoPlaceholder")}" autocomplete="off" required maxlength="200"/><button type="submit">${t("add")}</button></div>` : `<button class="create-step" data-action="create-${mode}" data-id="${group.id}">${icon("plus")} ${t("newGroup")}</button>`}
     ${mode === "task" ? "" : `<p class="hint">${t(mode === "previous" ? "previousHint" : "nextHint")}</p>
-    ${candidates.length ? `<div class="existing"><span>${t("linkExisting")}</span>${candidates.map((candidate) => `<button type="button" data-action="link-${mode}" data-id="${candidate.id}" data-group="${group.id}"><span data-group-label="${candidate.id}">${escapeHtml(name(candidate.id))}</span><span>＋</span></button>`).join("")}</div>` : ""}
-    ${group.prerequisiteIds.length ? `<div class="existing"><span>${t("linkedPrevious")}</span>${group.prerequisiteIds.map((id) => `<button type="button" data-action="unlink" data-id="${id}" data-group="${group.id}" title="${t("unlinkHint")}"><span data-group-label="${id}">${escapeHtml(name(id))}</span><span>×</span></button>`).join("")}</div>` : ""}`}
+    ${candidates.length ? `<div class="existing"><span>${t("linkExisting")}</span>${candidates.map((candidate) => `<button type="button" data-action="link-${mode}" data-id="${candidate.id}" data-group="${group.id}"><span data-group-label="${candidate.id}">${escapeHtml(name(candidate.id))}</span>${icon("plus")}</button>`).join("")}</div>` : ""}
+    ${group.prerequisiteIds.length ? `<div class="existing"><span>${t("linkedPrevious")}</span>${group.prerequisiteIds.map((id) => `<button type="button" data-action="unlink" data-id="${id}" data-group="${group.id}" title="${t("unlinkHint")}"><span data-group-label="${id}">${escapeHtml(name(id))}</span>${icon("close")}</button>`).join("")}</div>` : ""}`}
   </${mode === "task" ? "form" : "div"}>`;
 }
 
@@ -114,7 +104,7 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
     const previous = board.groups.find((item) => item.id === id);
     if (!previous) return "";
     if (owner.get(id) === group.id) return groupTemplate(previous, owner, depth + 1);
-    return `<button class="shared-step ${groupComplete(board, id) ? "is-done" : ""}" data-action="jump" data-id="${id}" title="${t("locatePrevious")}">${groupComplete(board, id) ? "✓" : "↗"} <span data-group-label="${id}">${escapeHtml(name(id))}</span><span class="shared-caption">${t("sharedPrevious")}</span></button>`;
+    return `<button class="shared-step ${groupComplete(board, id) ? "is-done" : ""}" data-action="jump" data-id="${id}" title="${t("locatePrevious")}">${icon(groupComplete(board, id) ? "check" : "jump")} <span data-group-label="${id}">${escapeHtml(name(id))}</span><span class="shared-caption">${t("sharedPrevious")}</span></button>`;
   }).join("");
   return `<section class="step ${complete ? "step-complete" : ""} ${depth > 5 ? "deep-step" : ""}" id="group-${group.id}" aria-label="${escapeHtml(name(group.id))}">
     ${predecessors ? `<div class="previous-steps">${predecessors}</div>` : ""}
@@ -132,7 +122,7 @@ function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): str
       </header>
       <div class="group-content" id="content-${group.id}" ${collapsed ? "hidden" : ""}>
         <div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
-        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">＋ ${t("firstTodo")}</button>`}
+        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">${icon("plus")} ${t("firstTodo")}</button>`}
       </div>
     </div>
   </section>`;
@@ -154,23 +144,16 @@ function render() {
   app.innerHTML = `<section class="shell">
     <div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
     <header class="controls" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(activeList.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime")}</span></div>
-      <div class="window-actions"><button class="icon-button" id="organize-button" title="${t("organize")}" aria-label="${t("organize")}">${icon("organize")}</button><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}" aria-expanded="${settingsOpen}" aria-controls="settings-panel" aria-haspopup="dialog">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}">⌃</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">−</button></div>
+      <div class="window-actions"><button class="icon-button" id="organize-button" title="${t("organize")}" aria-label="${t("organize")}">${icon("organize")}</button><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
     </header>
-    <section class="settings-panel" id="settings-panel" role="dialog" aria-labelledby="settings-title" ${settingsOpen ? "" : "hidden"}>
-      <header class="settings-header"><strong id="settings-title">${t("settings")}</strong><button id="close-settings" aria-label="${t("closeSettings")}" title="${t("closeSettings")}">×</button></header>
-      <section class="settings-section" aria-labelledby="general-settings"><h2 id="general-settings">${t("general")}</h2>
-        <div class="setting-row"><label for="language-select">${t("language")}</label><select id="language-select"><option value="zh-CN" lang="zh-CN" ${getLanguage() === "zh-CN" ? "selected" : ""}>简体中文</option><option value="en" lang="en" ${getLanguage() === "en" ? "selected" : ""}>English</option></select></div>
-        <p class="setting-hint">${t("languageHint")}</p>
-      </section>
-    </section>
     <div class="workspace">
-    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
-      <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> ${t("newGroup")}</button>
+    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
+      <button class="new-group-button" id="new-group-button">${icon("plus")} ${t("newGroup")}</button>
       <button class="delete-list-button" id="delete-list" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button>
     </div>
     <div class="tabs-bar">
       <div class="tabs" role="tablist" aria-label="${t("todoLists")}">${workspace.lists.map((list) => `<button class="tab ${list.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${list.id === workspace.activeListId}" aria-controls="todo-list" data-list="${list.id}" title="${escapeHtml(list.title)}">${escapeHtml(list.title)}</button>`).join("")}</div>
-      <button class="tab-action" id="new-list" title="${t("newList")}" aria-label="${t("newList")}">＋</button>
+      <button class="tab-action" id="new-list" title="${t("newList")}" aria-label="${t("newList")}">${icon("plus")}</button>
     </div>
     </div>
     <footer class="footer"><span>${t("footer", { groups: t(board.groups.length === 1 ? "oneGroup" : "manyGroups", { count: board.groups.length }), count: pending.length })}</span>${completed ? `<button id="clear-completed">${t("clearCompleted", { count: completed })}</button>` : `<span>${t("stayFocused")}</span>`}</footer>
@@ -186,34 +169,48 @@ function resizeTodo(input: HTMLTextAreaElement) {
   input.style.height = `${input.scrollHeight}px`;
 }
 
-function showSettings(open: boolean, restoreFocus = false) {
-  settingsOpen = open;
-  document.getElementById("settings-panel")!.hidden = !open;
-  document.getElementById("settings-button")!.setAttribute("aria-expanded", String(open));
-  if (open) document.getElementById("language-select")?.focus();
-  else if (restoreFocus) document.getElementById("settings-button")?.focus();
+async function openSettings() {
+  if (openingSettings) return;
+  openingSettings = true;
+  try {
+    if (isTauri()) await invoke("open_settings", { language: getLanguage() });
+    else if (settingsWindow && !settingsWindow.closed) settingsWindow.focus();
+    else {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", "settings");
+      settingsWindow = window.open(url, "zen-todo-settings", "popup,width=640,height=480,resizable=yes,scrollbars=yes");
+      if (!settingsWindow) throw new Error("Settings popup blocked");
+    }
+  } catch (error) {
+    message = t("openSettingsFailed");
+    const notice = document.querySelector<HTMLElement>(".notice")!;
+    notice.textContent = message;
+    notice.classList.add("visible");
+    console.error(error);
+  } finally { openingSettings = false; }
 }
 
-function changeLanguage(language: Language) {
-  const operation = pendingChange.then(async () => {
-    const previous = getLanguage();
-    if (language === previous) return;
-    const draft = document.querySelector<HTMLInputElement>("#step-input")?.value;
-    const select = document.querySelector<HTMLSelectElement>("#language-select")!;
-    select.disabled = true;
-    try {
-      if (isTauri()) await invoke("set_language", { language });
-      setLanguage(language);
-      message = "";
-    } catch (error) {
-      if (isTauri()) await invoke("set_language", { language: previous }).catch(console.error);
-      message = t("settingsFailed");
-      console.error(error);
-    }
+function refreshLanguage() {
+  const operation = pendingChange.then(() => {
+    // Another window can change language while an editor still has focus.
+    // Preserve editor values and the caret across the interface refresh.
+    const fields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("#step-input, #list-name, [data-rename], [data-edit-todo]")).map((input) => ({
+      selector: input.id ? `#${input.id}` : input.dataset.rename ? `[data-rename="${input.dataset.rename}"]` : `[data-edit-todo="${input.dataset.editTodo}"]`,
+      value: input.value, focused: document.activeElement === input,
+      start: input.selectionStart, end: input.selectionEnd,
+    }));
+    message = "";
     render();
-    const input = document.querySelector<HTMLInputElement>("#step-input");
-    if (input && draft !== undefined) input.value = draft;
-    if (settingsOpen) document.getElementById("language-select")?.focus();
+    for (const field of fields) {
+      const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(field.selector);
+      if (!input) continue;
+      input.value = field.value;
+      if (input instanceof HTMLTextAreaElement) resizeTodo(input);
+      if (field.focused) {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(field.start, field.end);
+      }
+    }
   });
   pendingChange = operation.catch(console.error);
 }
@@ -271,12 +268,7 @@ function handleAction(button: HTMLButtonElement) {
 }
 
 function bindEvents() {
-  document.querySelector("#settings-button")!.addEventListener("click", () => showSettings(!settingsOpen));
-  document.querySelector("#close-settings")!.addEventListener("click", () => showSettings(false, true));
-  document.querySelector<HTMLSelectElement>("#language-select")!.addEventListener("change", (event) => {
-    const value = (event.target as HTMLSelectElement).value;
-    if (value === "en" || value === "zh-CN") changeLanguage(value);
-  });
+  document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
       const id = tab.dataset.list!;
@@ -490,12 +482,7 @@ function bindEvents() {
 
 document.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
-  if (event.key === "Escape" && settingsOpen) { event.preventDefault(); showSettings(false, true); return; }
   if (event.key === "Escape") { composer = null; render(); }
-});
-
-document.addEventListener("pointerdown", (event) => {
-  if (settingsOpen && !(event.target as Element).closest("#settings-panel, #settings-button")) showSettings(false);
 });
 
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
@@ -506,6 +493,8 @@ async function start() {
   if (!workspace.lists.length || !workspace.lists.some((list) => list.id === workspace.activeListId)) throw new Error("Invalid workspace");
   for (const list of workspace.lists) reconcile(list.board);
   board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
+  const dispose = await watchSettings(refreshLanguage);
+  window.addEventListener("pagehide", dispose, { once: true });
   if (isTauri()) await invoke("set_language", { language: getLanguage() }).catch(() => { message = t("settingsFailed"); });
   render();
 }
