@@ -91,17 +91,32 @@ fn show_main<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+fn tray_menu<R: Runtime>(app: &AppHandle<R>, language: &str) -> Result<tauri::menu::Menu<R>, String> {
+    let english = language == "en";
+    tauri::menu::MenuBuilder::new(app)
+        .text("show", if english { "Show Zen Todo" } else { "显示 Zen Todo" })
+        .separator()
+        .text("quit", if english { "Quit" } else { "退出" })
+        .build()
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn set_language<R: Runtime>(app: AppHandle<R>, language: String) -> Result<(), String> {
+    if language != "zh-CN" && language != "en" {
+        return Err("Unsupported language".to_string());
+    }
+    let tray = app.tray_by_id("main-tray").ok_or_else(|| "tray not found".to_string())?;
+    tray.set_menu(Some(tray_menu(&app, &language)?)).map_err(|error| error.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
-            let menu = tauri::menu::MenuBuilder::new(app)
-                .item(&tauri::menu::MenuItemBuilder::with_id("show", "显示 Zen Todo").build(app)?)
-                .separator()
-                .item(&tauri::menu::MenuItemBuilder::with_id("quit", "退出").build(app)?)
-                .build()?;
+            let menu = tray_menu(app.handle(), "zh-CN").map_err(std::io::Error::other)?;
             let tray_icon = tauri::image::Image::from_app_icon_resource(32)?;
-            tauri::tray::TrayIconBuilder::new()
+            tauri::tray::TrayIconBuilder::with_id("main-tray")
                 .icon(tray_icon)
                 .menu(&menu)
                 .tooltip("Zen Todo")
@@ -124,7 +139,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, set_always_on_top, hide_window, start_dragging])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, set_always_on_top, hide_window, start_dragging, set_language])
         .run(tauri::generate_context!())
         .expect("error while running Zen Todo");
 }

@@ -22,16 +22,16 @@ export function createList(title = "新列表"): TodoList {
   return { id: crypto.randomUUID(), title, board: { groups: [], todos: [] } };
 }
 
-export function createWorkspace(): Workspace {
-  const list = createList("我的待办");
+export function createWorkspace(title = "我的待办"): Workspace {
+  const list = createList(title);
   return { lists: [list], activeListId: list.id };
 }
 
-export function deleteList(workspace: Workspace, id: string): void {
+export function deleteList(workspace: Workspace, id: string, fallbackTitle = "我的待办"): void {
   const index = workspace.lists.findIndex((list) => list.id === id);
   if (index < 0) return;
   workspace.lists.splice(index, 1);
-  if (!workspace.lists.length) workspace.lists.push(createList("我的待办"));
+  if (!workspace.lists.length) workspace.lists.push(createList(fallbackTitle));
   if (workspace.activeListId === id) {
     workspace.activeListId = workspace.lists[Math.min(index, workspace.lists.length - 1)].id;
   }
