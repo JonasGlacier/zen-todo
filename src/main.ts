@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./styles.css";
 
 type Todo = {
@@ -66,6 +67,10 @@ function render() {
   document.querySelector<HTMLButtonElement>("#pin-button")!.addEventListener("click", togglePin);
   document.querySelector<HTMLButtonElement>("#hide-button")!.addEventListener("click", () => invoke("hide_window"));
   document.querySelector<HTMLButtonElement>("#clear-completed")?.addEventListener("click", clearCompleted);
+  document.querySelector<HTMLElement>(".topbar")!.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || (event.target as Element).closest("button")) return;
+    void getCurrentWindow().startDragging();
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", () => handleTodoAction(button.dataset.action!, button.dataset.id!));
   });
