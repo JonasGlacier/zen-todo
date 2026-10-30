@@ -69,7 +69,9 @@ pub fn run() {
                 .separator()
                 .item(&tauri::menu::MenuItemBuilder::with_id("quit", "退出").build(app)?)
                 .build()?;
+            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
             tauri::tray::TrayIconBuilder::new()
+                .icon(tray_icon)
                 .menu(&menu)
                 .tooltip("Zen Todo")
                 .on_menu_event(|app, event| match event.id().as_ref() {
