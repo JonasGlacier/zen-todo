@@ -48,6 +48,11 @@ fn hide_window<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     main_window(&app)?.hide().map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn start_dragging(window: WebviewWindow) -> Result<(), String> {
+    window.start_dragging().map_err(|error| error.to_string())
+}
+
 fn show_main<R: Runtime>(app: &AppHandle<R>) {
     if let Ok(window) = main_window(app) {
         let _ = window.show();
@@ -86,7 +91,7 @@ pub fn run() {
                 let _ = window.hide();
             }
         })
-        .invoke_handler(tauri::generate_handler![load_todos, save_todos, set_always_on_top, hide_window])
+        .invoke_handler(tauri::generate_handler![load_todos, save_todos, set_always_on_top, hide_window, start_dragging])
         .run(tauri::generate_context!())
         .expect("error while running Zen Todo");
 }
