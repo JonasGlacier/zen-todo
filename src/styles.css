@@ -16,6 +16,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, [draggable]:f
 .icon-button { display: grid; width: 25px; height: 25px; place-items: center; color: #929789; border-radius: 6px; font-size: 17px; }
 .icon-button:hover, .icon-button.is-active { background: #e8ecdf; color: #617356; }
 .icon-button svg { width: 16px; height: 16px; }
+.tabs-bar { display: flex; align-items: center; gap: 2px; min-width: 0; margin: 0 0 9px; border-bottom: 1px solid #dce1d2; }
+.tabs { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
+.tab { flex: 0 0 auto; max-width: 120px; padding: 7px 10px; border-bottom: 2px solid transparent; color: #929b86; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab:hover { color: #60734e; background: #edf0e5; }
+.tab.is-selected { border-bottom-color: #7b8b6b; color: #526848; font-weight: 600; }
+.tab-action { flex: 0 0 23px; height: 25px; padding: 0; border-radius: 4px; color: #889579; font-size: 16px; }
+.tab-action:hover { background: #e8ecdf; color: #526848; }
 .list { flex: 1; min-height: 0; overflow: auto; padding: 2px 3px 8px; margin: 0 -3px; scrollbar-width: thin; scrollbar-color: #cdd1c2 transparent; }
 .step { border: 1px solid #c8cebd; border-radius: 3px; background: #fffef9; margin-bottom: 9px; }
 .previous-steps { padding: 0 0 0 9px; border-bottom: 1px solid #c8cebd; background: #f0f2e9; }

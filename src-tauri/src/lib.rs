@@ -28,6 +28,20 @@ struct Board {
     todos: Vec<Todo>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct TodoList {
+    id: String,
+    title: String,
+    board: Board,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Workspace {
+    lists: Vec<TodoList>,
+    active_list_id: String,
+}
+
 fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let directory = app.path().app_data_dir().map_err(|error| error.to_string())?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
@@ -35,15 +49,15 @@ fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Board, String> {
+fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Option<Workspace>, String> {
     let path = data_file(&app)?;
-    if !path.exists() { return Ok(Board::default()); }
+    if !path.exists() { return Ok(None); }
     let contents = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    serde_json::from_str(&contents).map_err(|error| error.to_string())
+    serde_json::from_str(&contents).map(Some).map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-fn save_board<R: Runtime>(app: AppHandle<R>, board: Board) -> Result<(), String> {
+fn save_board<R: Runtime>(app: AppHandle<R>, board: Workspace) -> Result<(), String> {
     let path = data_file(&app)?;
     let temporary = path.with_extension("json.tmp");
     let contents = serde_json::to_string_pretty(&board).map_err(|error| error.to_string())?;

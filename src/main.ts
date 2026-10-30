@@ -1,11 +1,12 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { canLink, clearCompleted, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
-import type { Board, Group, Todo } from "./board";
+import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
+import type { Board, Group, Todo, Workspace } from "./board";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
 const browserKey = "zen-todo-board";
-let board: Board = { groups: [], todos: [] };
+let workspace: Workspace = createWorkspace();
+let board: Board = workspace.lists[0].board;
 let pinned = true;
 let pendingChange = Promise.resolve();
 let message = "";
@@ -38,24 +39,26 @@ function newTodo(title: string, groupId: string) {
 }
 
 async function persist() {
-  if (isTauri()) await invoke("save_board", { board });
-  else localStorage.setItem(browserKey, JSON.stringify(board));
+  if (isTauri()) await invoke("save_board", { board: workspace });
+  else localStorage.setItem(browserKey, JSON.stringify(workspace));
 }
 
 // Queue edits and clicks so a slow disk save never discards the next action.
 function change(mutate: () => void, focus?: string, renderAfter = true): Promise<void> {
   const operation = pendingChange.then(async () => {
-    const previous = structuredClone(board);
+    const previous = structuredClone(workspace);
+    const previousBoard = structuredClone(board);
     try {
       message = "";
       mutate();
       reconcile(board);
-      const reset = previous.todos.filter((todo) => todo.completed && board.todos.some((current) =>
+      const reset = previousBoard.todos.filter((todo) => todo.completed && board.todos.some((current) =>
         current.id === todo.id && !current.completed && !groupReady(board, current.groupId))).length;
       if (reset) message = `已撤销 ${reset} 项后续待办的完成状态`;
       await persist();
     } catch (error) {
-      board = previous;
+      workspace = previous;
+      board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
       message = "保存失败，请重试。";
       console.error(error);
     } finally {
@@ -148,7 +151,13 @@ function render() {
     <header class="controls"><div><strong>Zen Todo</strong><span class="status">${pending.length ? `${available} 项可做${pending.length > available ? ` · ${pending.length - available} 项等待` : ""}` : completed ? "全部完成" : "一步一步，慢慢来"}</span></div>
       <div class="window-actions"><button class="icon-button" id="organize-button" title="一键整理" aria-label="一键整理">${icon("organize")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="${pinned ? "取消置顶" : "置顶窗口"}">⌃</button><button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button></div>
     </header>
-    <div class="list" id="todo-list">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
+    <div class="tabs-bar">
+      <div class="tabs" role="tablist" aria-label="待办列表">${workspace.lists.map((list) => `<button class="tab ${list.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${list.id === workspace.activeListId}" aria-controls="todo-list" data-list="${list.id}" title="${escapeHtml(list.title)}">${escapeHtml(list.title)}</button>`).join("")}</div>
+      <button class="tab-action" id="new-list" title="新建列表" aria-label="新建列表">＋</button>
+      <button class="tab-action" id="rename-list" title="重命名当前列表" aria-label="重命名当前列表">✎</button>
+      <button class="tab-action" id="delete-list" title="删除当前列表" aria-label="删除当前列表">×</button>
+    </div>
+    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>☷</span><strong>从一组待办开始</strong><p>同组一起做，前后分步骤。</p></div>`}
       <button class="new-group-button" id="new-group-button"><span aria-hidden="true">＋</span> 新建分组</button>
     </div>
     <footer class="footer"><span>${board.groups.length} 组 · ${pending.length} 项待完成</span>${completed ? `<button id="clear-completed">清除已完成 · ${completed}</button>` : "<span>保持专注</span>"}</footer>
@@ -217,6 +226,46 @@ function handleAction(button: HTMLButtonElement) {
 }
 
 function bindEvents() {
+  document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const id = tab.dataset.list!;
+      if (id === workspace.activeListId) return;
+      void change(() => {
+        const list = workspace.lists.find((item) => item.id === id);
+        if (!list) return;
+        workspace.activeListId = id;
+        board = list.board;
+        composer = null;
+        draggedId = null;
+      });
+    });
+  });
+  document.querySelector("#new-list")!.addEventListener("click", () => {
+    void change(() => {
+      const list = createList();
+      workspace.lists.push(list);
+      workspace.activeListId = list.id;
+      board = list.board;
+      composer = null;
+      draggedId = null;
+    });
+  });
+  document.querySelector("#rename-list")!.addEventListener("click", () => {
+    const list = workspace.lists.find((item) => item.id === workspace.activeListId)!;
+    const title = window.prompt("列表名称", list.title)?.trim();
+    if (!title || title === list.title) return;
+    void change(() => { const target = workspace.lists.find((item) => item.id === list.id); if (target) target.title = title.slice(0, 80); });
+  });
+  document.querySelector("#delete-list")!.addEventListener("click", () => {
+    const list = workspace.lists.find((item) => item.id === workspace.activeListId)!;
+    if (!window.confirm(`删除列表“${list.title}”及其中的所有待办？`)) return;
+    void change(() => {
+      deleteList(workspace, list.id);
+      board = workspace.lists.find((item) => item.id === workspace.activeListId)!.board;
+      composer = null;
+      draggedId = null;
+    });
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", () => handleAction(button));
   });
@@ -350,8 +399,11 @@ document.addEventListener("keydown", (event) => {
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
 
 async function start() {
-  board = isTauri() ? await invoke<Board>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? '{"groups":[],"todos":[]}');
-  reconcile(board);
+  const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
+  workspace = stored ?? createWorkspace();
+  if (!workspace.lists.length || !workspace.lists.some((list) => list.id === workspace.activeListId)) throw new Error("Invalid workspace");
+  for (const list of workspace.lists) reconcile(list.board);
+  board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
   render();
 }
 

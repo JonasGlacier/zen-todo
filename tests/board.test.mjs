@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canLink, clearCompleted, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "../src/board.ts";
+import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "../src/board.ts";
 
 function fixture(edges, counts = {}) {
   const ids = [...new Set(edges.flat())];
@@ -107,4 +107,27 @@ test("clearing completed steps removes their links without reblocking successors
   assert.equal(groupReady(board, "B"), true);
   assert.equal(board.todos.some((todo) => todo.id === "B0"), false);
   assert.equal(groupReady(board, "C"), false);
+});
+
+test("lists have independent boards and deleting the active list selects a remaining list", () => {
+  const workspace = createWorkspace();
+  const first = workspace.lists[0];
+  first.board.groups.push({ id: "group", title: "group", prerequisiteIds: [] });
+  const second = createList("工作");
+  workspace.lists.push(second);
+  workspace.activeListId = second.id;
+  assert.deepEqual(second.board.groups, []);
+  deleteList(workspace, second.id);
+  assert.equal(workspace.activeListId, first.id);
+  assert.equal(workspace.lists[0].board.groups.length, 1);
+});
+
+test("deleting the last list creates and selects a fresh empty list", () => {
+  const workspace = createWorkspace();
+  const oldId = workspace.activeListId;
+  deleteList(workspace, oldId);
+  assert.equal(workspace.lists.length, 1);
+  assert.notEqual(workspace.activeListId, oldId);
+  assert.equal(workspace.activeListId, workspace.lists[0].id);
+  assert.deepEqual(workspace.lists[0].board, { groups: [], todos: [] });
 });
