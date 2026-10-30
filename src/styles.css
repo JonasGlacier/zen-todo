@@ -1,17 +1,17 @@
 :root { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #292824; background: #f6f4ef; font-synthesis: none; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; background: #f6f4ef; }
+html, body, #app { height: 100%; }
+body { margin: 0; min-width: 300px; overflow: hidden; background: #f6f4ef; }
 button, input { font: inherit; }
 button { border: 0; cursor: pointer; }
-.shell { width: 100%; min-height: 100vh; padding: 16px 16px 11px; background: radial-gradient(circle at 100% 0%, #e9eee5 0, transparent 38%), #f6f4ef; }
-.topbar, .brand, .window-actions, .add-form, .todo, .footer { display: flex; align-items: center; }
-.topbar { justify-content: space-between; margin-bottom: 14px; cursor: grab; user-select: none; }
-.topbar:active { cursor: grabbing; }
+.shell { display: flex; width: 100%; height: 100%; flex-direction: column; padding: 7px 12px 10px; background: radial-gradient(circle at 100% 0%, #e9eee5 0, transparent 38%), #f6f4ef; }
+.controls, .window-actions, .add-form, .todo, .footer { display: flex; align-items: center; }
+.window-drag-region { height: 7px; flex: 0 0 auto; margin: -2px -5px 5px; border-radius: 5px; background: #e8e7df; cursor: grab; }
+.window-drag-region:hover { background: #deded6; }
+.window-drag-region:active { cursor: grabbing; background: #cdd5c8; }
+.controls { min-height: 24px; justify-content: space-between; margin-bottom: 8px; }
+.status { color: #98968d; font-size: 10px; user-select: none; }
 .window-actions { cursor: default; }
-.brand { gap: 8px; }
-.brand-mark { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 9px; color: #f8f7f1; background: #70836a; font-size: 15px; font-weight: 700; box-shadow: 0 4px 10px #70836a30; }
-h1 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
-.brand p { margin: 2px 0 0; color: #98968d; font-size: 10px; }
 .window-actions { gap: 3px; }
 .icon-button { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 7px; color: #a2a096; background: transparent; font-size: 16px; }
 .icon-button:hover, .icon-button.is-active { color: #657961; background: #e5e9df; }
@@ -21,8 +21,13 @@ h1 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
 .add-form input::placeholder { color: #b4b1a8; }
 .add-form button { padding: 6px 10px; border-radius: 7px; color: #fff; background: #70836a; font-size: 11px; font-weight: 600; }
 .add-form button:hover { background: #5e7158; }
-.list { display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
-.todo { gap: 8px; min-height: 38px; padding: 6px 8px; border: 1px solid #ebe8df; border-radius: 9px; background: #fffefa; box-shadow: 0 3px 10px #423f3207; }
+.list { display: flex; min-height: 0; flex: 1; flex-direction: column; gap: 5px; margin: 9px -4px; padding: 0 4px; overflow-y: auto; overscroll-behavior: contain; }
+.todo { gap: 8px; min-height: 36px; padding: 5px 8px; border: 1px solid #ebe8df; border-radius: 9px; background: #fffefa; box-shadow: 0 3px 10px #423f3207; cursor: grab; }
+.todo.is-dragging { opacity: .35; }
+.todo.is-drag-over { border-color: #70836a; }
+.todo.is-drag-over[data-drop-position="before"] { box-shadow: 0 -2px #70836a; }
+.todo.is-drag-over[data-drop-position="after"] { box-shadow: 0 2px #70836a; }
+.todo:active { cursor: grabbing; }
 .check { display: grid; width: 18px; height: 18px; flex: 0 0 auto; place-items: center; border: 1.5px solid #c9c8bf; border-radius: 50%; color: #fff; background: transparent; font-size: 11px; font-weight: 700; }
 .check:hover { border-color: #70836a; }
 .check.checked { border-color: #70836a; background: #70836a; }
@@ -35,9 +40,9 @@ h1 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
 .empty span { display: block; margin-bottom: 7px; color: #b5c2ae; font-size: 21px; }
 .empty strong { display: block; color: #79776f; font-size: 13px; font-weight: 600; }
 .empty p { margin: 4px 0 0; font-size: 10px; }
-.footer { justify-content: space-between; color: #aaa89f; font-size: 10px; }
+.footer { min-height: 16px; flex: 0 0 auto; justify-content: space-between; color: #aaa89f; font-size: 10px; }
 .footer button, .footer span:last-child { color: #9b998f; background: transparent; font-size: 10px; }
 .footer button:hover { color: #70836a; }
 .error { display: grid; min-height: 100vh; place-content: center; text-align: center; }
 .error p { color: #9b998f; font-size: 12px; }
-@media (max-width: 380px) { .shell { padding: 18px 15px 13px; } }
+@media (max-width: 380px) { .shell { padding-right: 10px; padding-left: 10px; } }

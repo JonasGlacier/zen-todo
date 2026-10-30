@@ -11,6 +11,7 @@ type Todo = {
 const app = document.querySelector<HTMLElement>("#app")!;
 let todos: Todo[] = [];
 let pinned = true;
+let draggedTodoId: string | null = null;
 
 const escapeHtml = (value: string) =>
   value.replace(/[&<>'"]/g, (character) => ({
@@ -31,14 +32,9 @@ function render() {
 
   app.innerHTML = `
     <section class="shell">
-      <header class="topbar" data-tauri-drag-region>
-        <div class="brand">
-          <span class="brand-mark">✓</span>
-          <div>
-            <h1>Zen Todo</h1>
-            <p>${active === 0 ? "今天可以轻松一点" : `${active} 项待完成`}</p>
-          </div>
-        </div>
+      <div class="window-drag-region" aria-label="拖动窗口"></div>
+      <header class="controls">
+        <span class="status">${active === 0 ? "已清空" : `${active} 项待完成`}</span>
         <div class="window-actions">
           <button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${pinned ? "取消置顶" : "置顶窗口"}" aria-label="置顶窗口">⌃</button>
           <button class="icon-button" id="hide-button" title="隐藏到托盘" aria-label="隐藏到托盘">−</button>
@@ -66,21 +62,78 @@ function render() {
   document.querySelector<HTMLButtonElement>("#pin-button")!.addEventListener("click", togglePin);
   document.querySelector<HTMLButtonElement>("#hide-button")!.addEventListener("click", () => invoke("hide_window"));
   document.querySelector<HTMLButtonElement>("#clear-completed")?.addEventListener("click", clearCompleted);
-  document.querySelector<HTMLElement>(".topbar")!.addEventListener("mousedown", (event) => {
+  document.querySelector<HTMLElement>(".window-drag-region")!.addEventListener("mousedown", (event) => {
     if (event.button !== 0 || (event.target as Element).closest("button")) return;
     void invoke("start_dragging");
   });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
     button.addEventListener("click", () => handleTodoAction(button.dataset.action!, button.dataset.id!));
   });
+  document.querySelectorAll<HTMLElement>(".todo").forEach((todo) => {
+    todo.addEventListener("dragstart", startTodoDrag);
+    todo.addEventListener("dragover", dragOverTodo);
+    todo.addEventListener("dragleave", () => {
+      todo.classList.remove("is-drag-over");
+      delete todo.dataset.dropPosition;
+    });
+    todo.addEventListener("drop", dropTodo);
+    todo.addEventListener("dragend", endTodoDrag);
+  });
 }
 
 function todoTemplate(todo: Todo) {
-  return `<article class="todo ${todo.completed ? "is-completed" : ""}">
+  return `<article class="todo ${todo.completed ? "is-completed" : ""}" draggable="true" data-id="${todo.id}">
     <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}" aria-label="${todo.completed ? "标记未完成" : "标记完成"}">${todo.completed ? "✓" : ""}</button>
     <span class="todo-title">${escapeHtml(todo.title)}</span>
     <button class="delete" data-action="delete" data-id="${todo.id}" aria-label="删除任务">×</button>
   </article>`;
+}
+
+function startTodoDrag(event: DragEvent) {
+  const todo = event.currentTarget as HTMLElement;
+  draggedTodoId = todo.dataset.id!;
+  event.dataTransfer?.setData("text/plain", draggedTodoId);
+  event.dataTransfer!.effectAllowed = "move";
+  requestAnimationFrame(() => todo.classList.add("is-dragging"));
+}
+
+function dragOverTodo(event: DragEvent) {
+  event.preventDefault();
+  const todo = event.currentTarget as HTMLElement;
+  if (todo.dataset.id === draggedTodoId) return;
+  event.dataTransfer!.dropEffect = "move";
+  const bounds = todo.getBoundingClientRect();
+  todo.dataset.dropPosition = event.clientY > bounds.top + bounds.height / 2 ? "after" : "before";
+  todo.classList.add("is-drag-over");
+}
+
+async function dropTodo(event: DragEvent) {
+  event.preventDefault();
+  const targetId = (event.currentTarget as HTMLElement).dataset.id!;
+  const sourceId = draggedTodoId ?? event.dataTransfer?.getData("text/plain");
+  if (!sourceId || sourceId === targetId) return;
+
+  const sourceIndex = todos.findIndex((todo) => todo.id === sourceId);
+  const targetIndex = todos.findIndex((todo) => todo.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return;
+
+  const target = event.currentTarget as HTMLElement;
+  const insertAfter = target.dataset.dropPosition === "after";
+  const [movedTodo] = todos.splice(sourceIndex, 1);
+  let insertIndex = targetIndex;
+  if (sourceIndex < targetIndex) insertIndex -= 1;
+  if (insertAfter) insertIndex += 1;
+  todos.splice(insertIndex, 0, movedTodo);
+  await persist();
+  render();
+}
+
+function endTodoDrag() {
+  draggedTodoId = null;
+  document.querySelectorAll(".is-dragging, .is-drag-over").forEach((todo) => {
+    todo.classList.remove("is-dragging", "is-drag-over");
+    delete (todo as HTMLElement).dataset.dropPosition;
+  });
 }
 
 async function addTodo(event: SubmitEvent) {
