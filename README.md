@@ -45,4 +45,6 @@ npm run tauri build
 
 构建完成后，在对应任务的 `Artifacts` 中下载 `zen-todo-windows-installer`，其中包含 Windows `.exe` 安装包。本地无需安装 Rust。
 
+工作流会先从 `src-tauri/icons/icon.svg` 自动生成 Windows 安装包所需的图标文件。
+
 数据保存在 `%APPDATA%/com.zentodo.app/` 下的 `todos.json` 中。
