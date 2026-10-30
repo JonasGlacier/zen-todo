@@ -69,7 +69,7 @@ pub fn run() {
                 .separator()
                 .item(&tauri::menu::MenuItemBuilder::with_id("quit", "退出").build(app)?)
                 .build()?;
-            let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+            let tray_icon = tauri::image::Image::from_app_icon_resource(32)?;
             tauri::tray::TrayIconBuilder::new()
                 .icon(tray_icon)
                 .menu(&menu)
