@@ -47,8 +47,12 @@ export function expandTodo(board: Board, id: string): Group | undefined {
   const index = board.todos.findIndex((todo) => todo.id === id);
   if (index < 0) return undefined;
   const todo = board.todos[index];
-  const group: Group = { id: crypto.randomUUID(), title: todo.title, prerequisiteIds: [], collapsed: false };
   const parentIndex = board.groups.findIndex((item) => item.id === todo.groupId);
+  const parent = board.groups[parentIndex];
+  const group: Group = { id: crypto.randomUUID(), title: todo.title, prerequisiteIds: [...(parent?.prerequisiteIds ?? [])], collapsed: false };
+  for (const successor of board.groups) {
+    if (successor.prerequisiteIds.includes(todo.groupId)) successor.prerequisiteIds.push(group.id);
+  }
   board.groups.splice(parentIndex < 0 ? board.groups.length : parentIndex + 1, 0, group);
   board.todos.splice(index, 1);
   reconcile(board);

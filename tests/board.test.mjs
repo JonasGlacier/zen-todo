@@ -132,15 +132,35 @@ test("deleting the last list creates and selects a fresh empty list", () => {
   assert.deepEqual(workspace.lists[0].board, { groups: [], todos: [] });
 });
 
-test("expanding a completed task creates an independent group and recalculates dependencies", () => {
+test("expanding a completed task creates a group and recalculates dependencies", () => {
   const board = fixture([["A", "B"]]);
   finish(board, "A");
   finish(board, "B");
   const group = expandTodo(board, "A0");
   assert.equal(group.title, "A0");
   assert.deepEqual(group.prerequisiteIds, []);
+  assert.deepEqual(board.groups.find((item) => item.id === "B").prerequisiteIds, ["A", group.id]);
   assert.equal(board.todos.some((todo) => todo.id === "A0"), false);
   assert.equal(board.todos.find((todo) => todo.id === "B0").completed, false);
   assert.equal(groupReady(board, "B"), false);
   assert.equal(expandTodo(board, "missing"), undefined);
+});
+
+test("expanding a task shares all previous and next groups without changing siblings", () => {
+  const board = fixture([["A", "C"], ["B", "C"], ["C", "D"], ["C", "E"], ["X", "D"]], { C: 2 });
+  const group = expandTodo(board, "C0");
+  assert.deepEqual(group.prerequisiteIds, ["A", "B"]);
+  assert.deepEqual(board.groups.find((item) => item.id === "C").prerequisiteIds, ["A", "B"]);
+  assert.deepEqual(board.groups.find((item) => item.id === "D").prerequisiteIds, ["C", "X", group.id]);
+  assert.deepEqual(board.groups.find((item) => item.id === "E").prerequisiteIds, ["C", group.id]);
+  assert.equal(board.todos.some((todo) => todo.id === "C1"), true);
+  finish(board, "A");
+  finish(board, "B");
+  finish(board, "C");
+  finish(board, "X");
+  assert.equal(groupReady(board, "D"), false);
+  board.todos.push({ id: "new", groupId: group.id, title: "new", completed: false, createdAt: 0 });
+  toggleTodo(board, "new");
+  assert.equal(groupReady(board, "D"), true);
+  assert.equal(groupReady(board, "E"), true);
 });
