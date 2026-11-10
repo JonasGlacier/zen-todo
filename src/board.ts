@@ -43,6 +43,18 @@ export function groupComplete(board: Board, id: string): boolean {
   return tasks.length > 0 && tasks.every((todo) => todo.completed);
 }
 
+export function expandTodo(board: Board, id: string): Group | undefined {
+  const index = board.todos.findIndex((todo) => todo.id === id);
+  if (index < 0) return undefined;
+  const todo = board.todos[index];
+  const group: Group = { id: crypto.randomUUID(), title: todo.title, prerequisiteIds: [], collapsed: false };
+  const parentIndex = board.groups.findIndex((item) => item.id === todo.groupId);
+  board.groups.splice(parentIndex < 0 ? board.groups.length : parentIndex + 1, 0, group);
+  board.todos.splice(index, 1);
+  reconcile(board);
+  return group;
+}
+
 export function groupReady(board: Board, id: string, visiting = new Set<string>()): boolean {
   const group = board.groups.find((item) => item.id === id);
   if (!group || visiting.has(id)) return false;

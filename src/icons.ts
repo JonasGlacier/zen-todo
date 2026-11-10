@@ -8,7 +8,7 @@ const icons = {
   task: ListPlus, previous: ArrowUpToLine, next: ArrowDownToLine,
   delete: Trash2, chevron: ChevronRight, organize: ListFilter, settings: Settings,
   pin: Pin, pinOff: PinOff, hide: Minus, plus: Plus, close: X, check: Check,
-  grip: GripVertical, jump: ArrowUpRight, empty: ListTodo,
+  grip: GripVertical, jump: ArrowUpRight, empty: ListTodo, expandTask: ListPlus,
   general: SlidersHorizontal, language: Languages, privacy: ShieldCheck,
 };
 const cache = new Map<keyof typeof icons, string>();

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "../src/board.ts";
+import { canLink, clearCompleted, createList, createWorkspace, deleteList, expandTodo, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "../src/board.ts";
 
 function fixture(edges, counts = {}) {
   const ids = [...new Set(edges.flat())];
@@ -130,4 +130,17 @@ test("deleting the last list creates and selects a fresh empty list", () => {
   assert.notEqual(workspace.activeListId, oldId);
   assert.equal(workspace.activeListId, workspace.lists[0].id);
   assert.deepEqual(workspace.lists[0].board, { groups: [], todos: [] });
+});
+
+test("expanding a completed task creates an independent group and recalculates dependencies", () => {
+  const board = fixture([["A", "B"]]);
+  finish(board, "A");
+  finish(board, "B");
+  const group = expandTodo(board, "A0");
+  assert.equal(group.title, "A0");
+  assert.deepEqual(group.prerequisiteIds, []);
+  assert.equal(board.todos.some((todo) => todo.id === "A0"), false);
+  assert.equal(board.todos.find((todo) => todo.id === "B0").completed, false);
+  assert.equal(groupReady(board, "B"), false);
+  assert.equal(expandTodo(board, "missing"), undefined);
 });

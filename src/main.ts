@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { canLink, clearCompleted, createList, createWorkspace, deleteList, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
+import { canLink, clearCompleted, createList, createWorkspace, deleteList, expandTodo, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
 import type { Board, Group, Todo, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
@@ -83,6 +83,7 @@ function todoTemplate(todo: Todo, ready: boolean) {
       ${!ready ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
       title="${ready ? "" : t("prerequisitesFirst")}">${todo.completed ? icon("check") : ""}</button>
     <textarea class="todo-title" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" rows="1" maxlength="200" spellcheck="false">${escapeHtml(todo.title)}</textarea>
+    <button class="expand-task" data-action="expand-task" data-id="${todo.id}" title="${t("expandTodo")}" aria-label="${escapeHtml(t("expandNamedTodo", { title: todo.title }))}">${icon("expandTask")}</button>
     <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
   </div>`;
 }
@@ -298,6 +299,9 @@ function handleAction(button: HTMLButtonElement) {
       if (reset) message = t("resetTasks", { count: reset });
     } else if (action === "delete-task") {
       board.todos = board.todos.filter((todo) => todo.id !== id);
+    } else if (action === "expand-task") {
+      const group = expandTodo(board, id);
+      if (group) composer = { groupId: group.id, mode: "task" };
     } else if (action === "delete-group") {
       removeGroups(board, new Set([id]));
       if (composer?.groupId === id) composer = null;
@@ -308,8 +312,8 @@ function handleAction(button: HTMLButtonElement) {
       linkGroups(board, action === "link-previous" ? id : groupId, action === "link-previous" ? groupId : id);
       composer = null;
     }
-  }, action === "fold" ? `fold-${id}` : action === "create-previous" || action === "create-next" ? "step-input" : undefined).then(() => {
-    if (action === "create-previous" || action === "create-next") document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
+  }, action === "fold" ? `fold-${id}` : action === "create-previous" || action === "create-next" || action === "expand-task" ? "step-input" : undefined).then(() => {
+    if (action === "create-previous" || action === "create-next" || action === "expand-task") document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
   });
 }
 
@@ -453,6 +457,7 @@ function bindEvents() {
         const row = input.closest(".todo")!;
         row.querySelector(".check")?.setAttribute("aria-label", t("taskLabel", { action: t(saved.completed ? "undoComplete" : "complete"), title: saved.title }));
         row.querySelector(".delete")?.setAttribute("aria-label", t("deleteNamedTodo", { title: saved.title }));
+        row.querySelector(".expand-task")?.setAttribute("aria-label", t("expandNamedTodo", { title: saved.title }));
         resizeTodo(input);
       });
     });

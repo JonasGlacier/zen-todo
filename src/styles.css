@@ -66,6 +66,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .todo-title { display: block; flex: 1; width: 100%; min-width: 0; padding: 0 2px; border: 0; border-radius: 2px; margin: 0; background: transparent; color: inherit; resize: none; overflow: hidden; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; cursor: text; }
 .todo-title:focus { background: #fffef9; }
 .is-completed .todo-title { color: #9da28f; text-decoration: line-through; }
+.expand-task { display: grid; width: 20px; height: 22px; flex-shrink: 0; padding: 2px; place-items: center; border-radius: 3px; color: #8d9981; }
+.expand-task .lucide { width: 15px; height: 15px; }
+.expand-task:hover { background: #e0e7d6; color: #526848; }
 .delete { display: grid; width: 20px; height: 22px; flex-shrink: 0; place-items: center; opacity: 0; color: #9a9f90; padding: 0 3px; }
 .delete .lucide { width: 13px; height: 13px; }
 .todo:hover .delete, .todo:focus-within .delete { opacity: 1; }
