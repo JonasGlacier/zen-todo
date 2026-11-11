@@ -54,8 +54,6 @@ struct Todo {
     created_at: i64,
     #[serde(default)]
     next_id: Option<String>,
-    #[serde(default)]
-    collapsed: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

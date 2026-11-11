@@ -6,7 +6,6 @@ export type Todo = {
   completed: boolean;
   createdAt: number;
   nextId: string | null;
-  collapsed?: boolean;
 };
 
 export type Board = { todos: Todo[] };
@@ -44,6 +43,17 @@ export function restoreList(workspace: Workspace, id: string): void {
   if (!list) return;
   list.archived = false;
   workspace.activeListId = id;
+}
+
+export function deleteList(workspace: Workspace, id: string, fallbackTitle = "我的待办"): void {
+  const index = workspace.lists.findIndex((list) => list.id === id);
+  if (index < 0) return;
+  workspace.lists.splice(index, 1);
+  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(fallbackTitle));
+  if (workspace.activeListId === id) {
+    workspace.activeListId = (workspace.lists.slice(index).find((list) => !list.archived)
+      ?? workspace.lists.slice(0, index).reverse().find((list) => !list.archived)!).id;
+  }
 }
 
 export function prerequisites(board: Board, id: string): Todo[] {
@@ -120,7 +130,6 @@ export function addTodo(board: Board, title = "", nextId: string | null = null, 
   const next = find(board, nextId);
   const todo: Todo = { id, title, completed: false, createdAt: Date.now(), nextId: next ? next.id : null };
   board.todos.push(todo);
-  if (next) next.collapsed = false;
   reconcile(board);
   return todo;
 }
@@ -138,7 +147,6 @@ export function addSibling(board: Board, afterId: string, id: string = crypto.ra
 export function linkTodos(board: Board, previousId: string, nextId: string): boolean {
   if (!canLink(board, previousId, nextId)) return false;
   find(board, previousId)!.nextId = nextId;
-  find(board, nextId)!.collapsed = false;
   reconcile(board);
   return true;
 }

@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  addSibling, addTodo, archiveList, canMove, countPrerequisites, createList, createWorkspace, indentTodo, isBlocked,
+  addSibling, addTodo, archiveList, canMove, createList, createWorkspace, deleteList, indentTodo, isBlocked,
   moveTodo, normalize, outdentTodo, prerequisites, reconcile, removeTodo, restoreList, toggleTodo,
 } from "./board";
 import type { Board, DropPlace, Todo, Workspace } from "./board";
@@ -75,17 +75,15 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
   return operation;
 }
 
-function todoRow(todo: Todo, collapsed: boolean, hasPrevious: boolean): string {
+function todoRow(todo: Todo): string {
   const blocked = isBlocked(board, todo);
   const label = escapeHtml(todo.title);
   return `<div class="todo ${todo.completed ? "is-completed" : ""} ${blocked ? "is-blocked" : ""}" data-todo="${todo.id}">
     <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
-    <button class="fold-button ${hasPrevious ? "" : "is-empty"} ${collapsed ? "" : "is-expanded"}" data-action="fold" data-id="${todo.id}" title="${t(collapsed ? "expandSteps" : "collapseSteps")}" aria-label="${t(collapsed ? "expandSteps" : "collapseSteps")}" aria-expanded="${!collapsed}" ${hasPrevious ? "" : "tabindex=\"-1\" aria-hidden=\"true\""}>${icon("chevron")}</button>
     <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}"
       ${blocked ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
       title="${blocked ? t("prerequisitesFirst") : ""}">${todo.completed ? icon("check") : ""}</button>
     <textarea class="todo-title" id="${editorId(todo.id)}" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" placeholder="${t("todoPlaceholder")}" rows="1" maxlength="200" spellcheck="false">${label}</textarea>
-    ${collapsed ? `<span class="hidden-count">${t("hiddenSteps", { count: countPrerequisites(board, todo.id) })}</span>` : ""}
     <button class="row-action" data-action="add-previous" data-id="${todo.id}" title="${t("addPrevious")}" aria-label="${escapeHtml(t("addPreviousNamed", { title: todo.title }))}">${icon("previous")}</button>
     <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
   </div>`;
@@ -94,8 +92,7 @@ function todoRow(todo: Todo, collapsed: boolean, hasPrevious: boolean): string {
 // Previous steps are drawn indented above the task they lead to.
 function nodeTemplate(todo: Todo): string {
   const previous = prerequisites(board, todo.id);
-  const collapsed = Boolean(todo.collapsed) && previous.length > 0;
-  return `<div class="node" id="node-${todo.id}">${previous.length && !collapsed ? `<div class="children">${previous.map(nodeTemplate).join("")}</div>` : ""}${todoRow(todo, collapsed, previous.length > 0)}</div>`;
+  return `<div class="node" id="node-${todo.id}">${previous.length ? `<div class="children">${previous.map(nodeTemplate).join("")}</div>` : ""}${todoRow(todo)}</div>`;
 }
 
 function archiveTemplate(): string {
@@ -104,8 +101,8 @@ function archiveTemplate(): string {
     <div class="archive-heading">${t("archivedLists")}</div>
     ${archived.length ? archived.map((list) => {
       const done = list.board.todos.filter((todo) => todo.completed).length;
-      return `<details class="archived-list"><summary><span class="archived-name">${escapeHtml(list.title)}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span><button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button></summary>
-        <ul class="archived-tasks">${list.board.todos.length ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("") : `<li class="muted">${t("emptyArchivedList")}</li>`}</ul></details>`;
+      return `<section class="archived-list"><div class="archived-header"><span class="archived-name">${escapeHtml(list.title)}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span><button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button></div>
+        <ul class="archived-tasks">${list.board.todos.length ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("") : `<li class="muted">${t("emptyArchivedList")}</li>`}</ul><button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}" aria-label="${escapeHtml(t("holdDeleteNamedList", { title: list.title }))}">${t("holdDeleteList")}</button></section>`;
     }).join("") : `<p class="muted archive-empty">${t("archivedEmpty")}</p>`}
   </div>`;
 }
@@ -123,11 +120,12 @@ function render() {
   const content = showArchive ? archiveTemplate() : `<div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
       <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
       <button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
+      <button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button>
     </div>`;
   app.innerHTML = `<section class="shell">
     <div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
     <header class="controls" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime")}</span></div>
-      <div class="window-actions"><button class="icon-button" id="organize-button" title="${t("organize")}" aria-label="${t("organize")}">${icon("organize")}</button><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
+      <div class="window-actions"><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
     </header>
     <div class="workspace">
     ${content}
@@ -244,10 +242,7 @@ function handleAction(button: HTMLButtonElement) {
     return;
   }
   void change(() => {
-    if (action === "fold") {
-      const todo = board.todos.find((item) => item.id === id)!;
-      todo.collapsed = !todo.collapsed;
-    } else if (action === "toggle") {
+    if (action === "toggle") {
       const reset = toggleTodo(board, id);
       if (reset) message = t("resetTasks", { count: reset });
     } else if (action === "delete-task") {
@@ -371,8 +366,34 @@ function bindEvents() {
     }
   });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
-    // Restore buttons live inside <summary>; keep the click from toggling it.
     button.addEventListener("click", (event) => { event.preventDefault(); handleAction(button); });
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-delete-list]").forEach((button) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = () => { clearTimeout(timer); timer = undefined; button.classList.remove("is-holding"); };
+    const start = () => {
+      if (timer) return;
+      button.classList.add("is-holding");
+      timer = setTimeout(() => {
+        timer = undefined;
+        button.classList.remove("is-holding");
+        if (!button.isConnected) return;
+        const id = button.dataset.deleteList!;
+        void change(() => {
+          deleteList(workspace, id, t("myTodos"));
+          board = activeList().board;
+          draggedId = null;
+        });
+      }, 1500);
+    };
+    button.addEventListener("pointerdown", (event) => { if (event.button === 0) start(); });
+    for (const event of ["pointerup", "pointerleave", "pointercancel", "blur"] as const) button.addEventListener(event, cancel);
+    button.addEventListener("keydown", (event) => {
+      if (event.key === " " || event.key === "Enter") { event.preventDefault(); start(); }
+    });
+    button.addEventListener("keyup", (event) => {
+      if (event.key === " " || event.key === "Enter") { event.preventDefault(); cancel(); }
+    });
   });
   document.querySelector("#new-task-button")?.addEventListener("click", () => {
     const newId = crypto.randomUUID();
@@ -402,11 +423,6 @@ function bindEvents() {
       });
     });
     input.addEventListener("keydown", (event) => handleTodoKey(input, event));
-  });
-  document.querySelector("#organize-button")!.addEventListener("click", () => {
-    void change(() => {
-      for (const todo of board.todos) todo.collapsed = todo.completed && prerequisites(board, todo.id).length > 0;
-    }, "organize-button");
   });
   document.querySelector("#pin-button")!.addEventListener("click", () => {
     const operation = pendingChange.then(async () => {

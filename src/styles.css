@@ -41,11 +41,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .drag-handle { flex: 0 0 12px; color: #adb3a1; cursor: grab; margin-right: -2px; opacity: 0; user-select: none; }
 .drag-handle .lucide { width: 12px; height: 15px; }
 .todo:hover .drag-handle { opacity: 1; }
-.fold-button { display: grid; width: 16px; height: 22px; flex: 0 0 auto; padding: 2px; place-items: center; border-radius: 3px; color: #8a967c; }
-.fold-button.is-empty { visibility: hidden; }
-.fold-button svg { width: 12px; height: 12px; }
-.fold-button.is-expanded svg { transform: rotate(90deg); }
-.fold-button:hover { color: #526848; background: #e9eddf; }
 .check { display: grid; place-items: center; border: 1.3px solid #b6beaa; border-radius: 3px; width: 15px; height: 15px; flex: 0 0 auto; padding: 0; color: white; font-size: 11px; }
 .check:hover:not(:disabled) { border-color: #657d55; background: #e8eddf; }
 .check.checked { background: #7b8b6b; border-color: #7b8b6b; }
@@ -56,7 +51,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .is-completed .todo-title { color: #9da28f; text-decoration: line-through; }
 .is-blocked .todo-title { color: #979b92; }
 .is-blocked .check { background: #eeefe9; border-color: #d1d5c9; }
-.hidden-count { flex-shrink: 0; color: #989e90; font-size: 10px; }
 .row-action, .delete { display: grid; width: 20px; height: 22px; flex-shrink: 0; place-items: center; opacity: 0; padding: 2px; border-radius: 3px; color: #8d9981; }
 .row-action .lucide { width: 14px; height: 14px; }
 .delete { color: #9a9f90; }
@@ -69,12 +63,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .new-task-button .lucide, .archive-list-button .lucide { width: 13px; height: 13px; }
 .archive-list-button { margin-top: 20px; color: #a0a596; font-size: 10px; justify-content: center; }
 .archive-list-button:hover { background: #edf0e5; color: #60734e; }
+.delete-list-button { display: block; width: 100%; padding: 8px; border-radius: 3px; color: #ae9388; font-size: 10px; text-align: center; user-select: none; touch-action: manipulation; }
+.delete-list-button:hover { color: #ab6559; background: #f5ebe6; }
+.delete-list-button.is-holding { color: #ab6559; background: linear-gradient(to right, #eed8ce 100%, #f5ebe6 100%) left / 0% 100% no-repeat #f5ebe6; animation: hold-delete 1.5s linear forwards; }
+@keyframes hold-delete { to { background-size: 100% 100%; } }
 .tab-action.is-active { background: #e8ecdf; color: #526848; }
 .archive-heading { padding: 4px 2px 8px; font-size: 11px; font-weight: 600; color: #68755f; }
 .archived-list { border-bottom: 1px solid #dce1d2; }
-.archived-list summary { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px 2px; cursor: pointer; list-style: none; border-radius: 3px; }
-.archived-list summary::-webkit-details-marker { display: none; }
-.archived-list summary:hover { background: #f1f3e9; }
+.archived-header { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px; }
 .archived-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
 .archived-meta { flex-shrink: 0; color: #989e90; font-size: 10px; }
 .restore-button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 3px 6px; border-radius: 3px; color: #60734e; font-size: 10px; }

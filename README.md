@@ -10,7 +10,7 @@ A lightweight floating todo app for Windows 10 and 11, built with Tauri 2, Rust,
 
 ## Features
 
-- Keep multiple independent lists and archive a whole list instead of deleting it; archived lists can be viewed and restored.
+- Keep multiple independent lists; archive them for later viewing and restoration, or hold the delete button for 1.5 seconds to delete a list.
 - Tasks are plain, Notion-style rows. Each task can have several previous steps but only one next step, so dependencies form a tree that converges. Previous steps are indented above the task they lead to; a task can be completed only after all its previous steps are done, and reopening one reopens the tasks after it.
 - Edit in place: Enter adds a task, Tab/Shift+Tab nests or lifts it, and drag the handle to reorder or drop onto another task to make it that task's previous step.
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
@@ -47,14 +47,14 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 ## 当前功能
 
 - 通过标签页创建、切换、重命名多个独立待办列表；点击顶部列表名称可编辑
-- 不再删除列表，而是“归档清单”：整张清单移入“已归档”，可在标签栏的归档按钮中查看并恢复；归档最后一个活跃列表时自动创建空白列表
+- 可归档清单，在标签栏的归档按钮中查看并恢复；也可长按删除按钮 1.5 秒删除活跃或已归档的清单。归档或删除最后一个活跃列表时自动创建空白列表
 - 待办是类似 Notion 的独立行，不再有分组；点击文字即可编辑，已完成的待办会一直保留
 - 每个待办可以有多个“上一步”，但只有一个“下一步”，整体是逐渐收敛的树；上一步缩进显示在下一步上方
 - 所有上一步完成后，待办才能完成；撤销某个上一步时，自动撤销其后续待办的完成状态
 - 键盘：回车添加同级待办；Tab 设为下一行待办的上一步，Shift+Tab 上移一级；空的新待办按 Backspace 删除；上下方向键在待办间移动
 - 拖动左侧手柄：落在目标上/下边缘为调整顺序（并改为同一个下一步），落在中间则成为目标的上一步；不能形成循环
 - 悬停显示“添加上一步”和删除；删除待办时，其上一步改为连接到它的下一步
-- 待办左侧箭头折叠或展开上一步；顶部“收起已完成”折叠所有已完成的待办的上一步
+- 所有上一步始终显示在清单中
 - 任务保存到用户数据目录，不依赖数据库；旧数据不做迁移兼容
 - 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
 - 顶部齿轮打开独立设置窗口，可切换简体中文 / English
@@ -87,7 +87,7 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 
 此模式默认开启，不提供开关。点击隐藏按钮或关闭主窗口时，应用会等待当前保存完成，再保存待办和界面快照，销毁主窗口及设置窗口的 WebView。没有窗口时，Rust 进程和系统托盘仍然运行；托盘菜单的“退出”才会结束应用。
 
-点击托盘图标或“显示窗口”时，应用按原窗口配置重新创建主窗口，恢复当前列表、折叠状态、置顶状态、窗口位置和大小、滚动位置及待办输入草稿。设置窗口不自动重建。界面快照保留在托盘进程内存中；已保存待办仍写入 `todos.json`。保存失败时不会销毁主窗口，可继续编辑并重试。
+点击托盘图标或“显示窗口”时，应用按原窗口配置重新创建主窗口，恢复当前列表、置顶状态、窗口位置和大小、滚动位置及待办输入草稿。设置窗口不自动重建。界面快照保留在托盘进程内存中；已保存待办仍写入 `todos.json`。保存失败时不会销毁主窗口，可继续编辑并重试。
 
 ## 开发环境
 

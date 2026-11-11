@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  addSibling, addTodo, archiveList, canLink, canMove, countPrerequisites, createList, createWorkspace, indentTodo,
+  addSibling, addTodo, archiveList, canLink, canMove, countPrerequisites, createList, createWorkspace, deleteList, indentTodo,
   isBlocked, linkTodos, moveTodo, normalize, outdentTodo, reconcile, removeTodo, restoreList, toggleTodo,
 } from "../src/board.ts";
 
@@ -164,4 +164,32 @@ test("archiving the last active list creates and selects a fresh empty list", ()
   assert.equal(old.board.todos.length, 1);
   assert.notEqual(workspace.activeListId, old.id);
   assert.deepEqual(workspace.lists[1].board, { todos: [] });
+});
+
+test("deleting an active list selects an unarchived neighbor and keeps archived lists", () => {
+  const workspace = createWorkspace();
+  const first = workspace.lists[0];
+  const archived = createList("archived");
+  archived.archived = true;
+  const last = createList("last");
+  workspace.lists.push(archived, last);
+  deleteList(workspace, first.id);
+  assert.equal(workspace.activeListId, last.id);
+  assert.deepEqual(workspace.lists.map((list) => list.id), [archived.id, last.id]);
+  deleteList(workspace, archived.id);
+  assert.equal(workspace.activeListId, last.id);
+  assert.deepEqual(workspace.lists.map((list) => list.id), [last.id]);
+});
+
+test("deleting the last active list creates a new one while retaining archived lists", () => {
+  const workspace = createWorkspace();
+  const active = workspace.lists[0];
+  const archived = createList("archived");
+  archived.archived = true;
+  workspace.lists.push(archived);
+  deleteList(workspace, active.id);
+  assert.equal(workspace.lists.length, 2);
+  assert.equal(workspace.lists[0], archived);
+  assert.notEqual(workspace.activeListId, active.id);
+  assert.equal(workspace.lists.find((list) => list.id === workspace.activeListId).archived, false);
 });
