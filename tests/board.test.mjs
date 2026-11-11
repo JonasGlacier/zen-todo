@@ -1,166 +1,167 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canLink, clearCompleted, createList, createWorkspace, deleteList, expandTodo, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "../src/board.ts";
+import {
+  addSibling, addTodo, archiveList, canLink, canMove, countPrerequisites, createList, createWorkspace, indentTodo,
+  isBlocked, linkTodos, moveTodo, normalize, outdentTodo, reconcile, removeTodo, restoreList, toggleTodo,
+} from "../src/board.ts";
 
-function fixture(edges, counts = {}) {
-  const ids = [...new Set(edges.flat())];
-  const groups = ids.map((id) => ({ id, title: id, prerequisiteIds: [] }));
-  for (const [previous, next] of edges) groups.find((group) => group.id === next).prerequisiteIds.push(previous);
-  const todos = ids.flatMap((groupId) => Array.from({ length: counts[groupId] ?? 1 }, (_, index) => ({
-    id: `${groupId}${index}`, groupId, title: `${groupId}${index}`, completed: false, createdAt: index,
-  })));
-  return { groups, todos };
+// edges: [previous, next]; every task has at most one next step.
+function fixture(edges, extra = []) {
+  const ids = [...new Set([...edges.flat(), ...extra])];
+  const todos = ids.map((id) => ({ id, title: id, completed: false, createdAt: 0, nextId: null }));
+  for (const [previous, next] of edges) todos.find((todo) => todo.id === previous).nextId = next;
+  return { todos };
 }
-const finish = (board, id) => board.todos.filter((todo) => todo.groupId === id).forEach((todo) => toggleTodo(board, todo.id));
+const get = (board, id) => board.todos.find((todo) => todo.id === id);
+const done = (board, id) => get(board, id).completed;
 
-test("diagram: A and D → B → C, E → F, C and F → G", () => {
-  const board = fixture([["A", "B"], ["D", "B"], ["B", "C"], ["E", "F"], ["C", "G"], ["F", "G"]], { A: 4, B: 3, E: 3, G: 3 });
-  assert.equal(groupReady(board, "A"), true);
-  assert.equal(groupReady(board, "E"), true);
-  toggleTodo(board, "B0");
-  assert.equal(board.todos.find((todo) => todo.id === "B0").completed, false);
-  finish(board, "A");
-  assert.equal(groupReady(board, "B"), false);
-  finish(board, "D");
-  assert.equal(groupReady(board, "B"), true);
-  finish(board, "B");
-  finish(board, "C");
-  assert.equal(groupReady(board, "G"), false);
-  finish(board, "E");
-  finish(board, "F");
-  assert.equal(groupReady(board, "G"), true);
-  toggleTodo(board, "G0");
-  assert.equal(groupComplete(board, "G"), false);
+test("a task is blocked until all of its previous steps are complete", () => {
+  const board = fixture([["A", "C"], ["B", "C"]]);
+  assert.equal(isBlocked(board, get(board, "C")), true);
+  toggleTodo(board, "C");
+  assert.equal(done(board, "C"), false);
+  toggleTodo(board, "A");
+  assert.equal(isBlocked(board, get(board, "C")), true);
+  toggleTodo(board, "B");
+  assert.equal(isBlocked(board, get(board, "C")), false);
+  toggleTodo(board, "C");
+  assert.equal(done(board, "C"), true);
 });
 
-test("many-to-many shared prerequisites unlock all dependent groups", () => {
-  const board = fixture([["A", "C"], ["A", "D"], ["B", "C"], ["B", "D"]]);
-  finish(board, "A");
-  assert.equal(groupReady(board, "C"), false);
-  assert.equal(groupReady(board, "D"), false);
-  finish(board, "B");
-  assert.equal(groupReady(board, "C"), true);
-  assert.equal(groupReady(board, "D"), true);
-});
-
-test("undoing one prerequisite resets descendants but not the parallel branch", () => {
+test("undoing a previous step resets completed later steps only along its branch", () => {
   const board = fixture([["A", "B"], ["B", "C"], ["X", "C"]]);
-  for (const id of ["A", "B", "X", "C"]) finish(board, id);
-  assert.equal(toggleTodo(board, "A0"), 2);
-  assert.equal(groupComplete(board, "B"), false);
-  assert.equal(groupComplete(board, "C"), false);
-  assert.equal(groupComplete(board, "X"), true);
-  finish(board, "A");
-  assert.equal(groupReady(board, "B"), true);
-  assert.equal(groupComplete(board, "B"), false);
+  for (const id of ["A", "B", "X", "C"]) toggleTodo(board, id);
+  assert.equal(toggleTodo(board, "A"), 2);
+  assert.deepEqual(["A", "B", "C", "X"].map((id) => done(board, id)), [false, false, false, true]);
 });
 
-test("self-links, duplicate links and indirect cycles are rejected", () => {
+test("a task keeps a single next step: linking again replaces it", () => {
+  const board = fixture([["A", "B"]], ["C"]);
+  assert.equal(linkTodos(board, "A", "C"), true);
+  assert.equal(get(board, "A").nextId, "C");
+  assert.equal(linkTodos(board, "A", "C"), false);
+});
+
+test("self-links and cycles are rejected", () => {
   const board = fixture([["A", "B"], ["B", "C"]]);
   assert.equal(canLink(board, "A", "A"), false);
-  assert.equal(canLink(board, "A", "B"), false);
   assert.equal(canLink(board, "C", "A"), false);
+  assert.equal(canLink(board, "C", "B"), false);
   assert.equal(canLink(board, "missing", "A"), false);
-  assert.equal(linkGroups(board, "C", "A"), false);
-  assert.equal(linkGroups(board, "A", "C"), true);
+  assert.equal(canLink(board, "A", "C"), true);
 });
 
-test("adding an unmet prerequisite resets a completed group and its successors", () => {
-  const board = fixture([["A", "B"], ["X", "Y"]]);
-  finish(board, "A");
-  finish(board, "B");
-  assert.equal(linkGroups(board, "X", "A"), true);
-  assert.equal(groupComplete(board, "A"), false);
-  assert.equal(groupComplete(board, "B"), false);
+test("linking an unfinished task below a completed one reopens it and its successors", () => {
+  const board = fixture([["A", "B"]], ["X"]);
+  toggleTodo(board, "A");
+  toggleTodo(board, "B");
+  assert.equal(linkTodos(board, "X", "A"), true);
+  assert.deepEqual(["A", "B"].map((id) => done(board, id)), [false, false]);
 });
 
-test("new tasks and empty prerequisites block successors", () => {
+test("a new previous step reopens its completed next step", () => {
+  const board = fixture([["A", "B"]]);
+  toggleTodo(board, "A");
+  toggleTodo(board, "B");
+  const added = addTodo(board, "new", "B");
+  assert.equal(added.nextId, "B");
+  assert.equal(done(board, "B"), false);
+});
+
+test("addSibling shares the next step and follows the source", () => {
+  const board = fixture([["A", "C"]], ["Z"]);
+  board.todos.push({ id: "D", title: "", completed: false, createdAt: 0, nextId: null });
+  const sibling = addSibling(board, "A");
+  assert.equal(sibling.nextId, "C");
+  assert.deepEqual(board.todos.map((todo) => todo.id).slice(0, 3), ["A", sibling.id, "C"]);
+  assert.equal(addSibling(board, "missing"), undefined);
+});
+
+test("removing a task passes its previous steps on to its next step", () => {
+  const board = fixture([["A", "B"], ["X", "B"], ["B", "C"]]);
+  removeTodo(board, "B");
+  assert.equal(get(board, "A").nextId, "C");
+  assert.equal(get(board, "X").nextId, "C");
+  removeTodo(board, "C");
+  assert.equal(get(board, "A").nextId, null);
+  assert.equal(board.todos.length, 2);
+});
+
+test("removing an unfinished previous step can unblock its next step", () => {
+  const board = fixture([["A", "B"], ["X", "B"]]);
+  toggleTodo(board, "A");
+  removeTodo(board, "X");
+  assert.equal(isBlocked(board, get(board, "B")), false);
+});
+
+test("indent nests under the following sibling and outdent moves up one level", () => {
+  const board = fixture([["A", "R"], ["B", "R"]]);
+  assert.equal(indentTodo(board, "A"), true);
+  assert.equal(get(board, "A").nextId, "B");
+  assert.equal(indentTodo(board, "B"), false);
+  assert.equal(outdentTodo(board, "A"), true);
+  assert.equal(get(board, "A").nextId, "R");
+  assert.deepEqual(board.todos.map((todo) => todo.id), ["R", "A", "B"]);
+  assert.equal(outdentTodo(board, "R"), false);
+});
+
+test("moving relative to a target changes order and parent, but never into its own subtree", () => {
+  const board = fixture([["A", "B"], ["B", "C"]], ["X"]);
+  assert.equal(moveTodo(board, "X", "A", "before"), true);
+  assert.equal(get(board, "X").nextId, "B");
+  assert.equal(board.todos[0].id, "X");
+  assert.equal(moveTodo(board, "X", "C", "after"), true);
+  assert.equal(get(board, "X").nextId, null);
+  assert.equal(board.todos.at(-1).id, "X");
+  assert.equal(canMove(board, "C", "A", "into"), false);
+  assert.equal(canMove(board, "C", "A", "before"), false);
+  assert.equal(moveTodo(board, "A", "X", "into"), true);
+  assert.equal(get(board, "A").nextId, "X");
+  assert.equal(countPrerequisites(board, "X"), 1);
+});
+
+test("normalize repairs missing, self and cyclic references", () => {
+  const board = fixture([["A", "B"]]);
+  get(board, "B").nextId = "A";
+  board.todos.push({ id: "S", title: "", completed: true, createdAt: 0, nextId: "S" });
+  board.todos.push({ id: "M", title: "", completed: false, createdAt: 0, nextId: "gone" });
+  board.todos.push({ id: "U", title: "", completed: false, createdAt: 0 });
+  normalize(board);
+  assert.equal(get(board, "S").nextId, null);
+  assert.equal(get(board, "M").nextId, null);
+  assert.equal(get(board, "U").nextId, null);
+  assert.equal(board.todos.filter((todo) => ["A", "B"].includes(todo.id) && todo.nextId).length, 1);
+});
+
+test("reconcile reopens invalid completed tasks in any storage order", () => {
   const board = fixture([["A", "B"], ["B", "C"]]);
-  finish(board, "A");
-  finish(board, "B");
-  finish(board, "C");
-  board.todos.push({ id: "A1", groupId: "A", title: "new", completed: false, createdAt: 0 });
+  board.todos.forEach((todo) => { todo.completed = todo.id !== "A"; });
   assert.equal(reconcile(board), 2);
-  board.todos = board.todos.filter((todo) => todo.groupId !== "A");
-  assert.equal(groupComplete(board, "A"), false);
-  assert.equal(groupReady(board, "B"), false);
 });
 
-test("deleting a group removes only its tasks and edges", () => {
-  const board = fixture([["A", "C"], ["B", "C"], ["C", "D"]]);
-  removeGroups(board, new Set(["A"]));
-  assert.deepEqual(board.groups.find((group) => group.id === "C").prerequisiteIds, ["B"]);
-  assert.equal(board.todos.some((todo) => todo.groupId === "A"), false);
-  assert.equal(board.todos.some((todo) => todo.groupId === "D"), true);
-  assert.equal(groupReady(board, "C"), false);
-  finish(board, "B");
-  assert.equal(groupReady(board, "C"), true);
-});
-
-test("clearing completed steps removes their links without reblocking successors", () => {
-  const board = fixture([["A", "B"], ["B", "C"]], { B: 2 });
-  finish(board, "A");
-  toggleTodo(board, "B0");
-  clearCompleted(board);
-  assert.deepEqual(board.groups.map((group) => group.id), ["B", "C"]);
-  assert.deepEqual(board.groups[0].prerequisiteIds, []);
-  assert.equal(groupReady(board, "B"), true);
-  assert.equal(board.todos.some((todo) => todo.id === "B0"), false);
-  assert.equal(groupReady(board, "C"), false);
-});
-
-test("lists have independent boards and deleting the active list selects a remaining list", () => {
+test("archiving keeps the list, selects a remaining list and can be restored", () => {
   const workspace = createWorkspace();
   const first = workspace.lists[0];
-  first.board.groups.push({ id: "group", title: "group", prerequisiteIds: [] });
   const second = createList("工作");
   workspace.lists.push(second);
   workspace.activeListId = second.id;
-  assert.deepEqual(second.board.groups, []);
-  deleteList(workspace, second.id);
+  archiveList(workspace, second.id);
+  assert.equal(workspace.lists.length, 2);
+  assert.equal(second.archived, true);
   assert.equal(workspace.activeListId, first.id);
-  assert.equal(workspace.lists[0].board.groups.length, 1);
+  restoreList(workspace, second.id);
+  assert.equal(second.archived, false);
+  assert.equal(workspace.activeListId, second.id);
 });
 
-test("deleting the last list creates and selects a fresh empty list", () => {
+test("archiving the last active list creates and selects a fresh empty list", () => {
   const workspace = createWorkspace();
-  const oldId = workspace.activeListId;
-  deleteList(workspace, oldId);
-  assert.equal(workspace.lists.length, 1);
-  assert.notEqual(workspace.activeListId, oldId);
-  assert.equal(workspace.activeListId, workspace.lists[0].id);
-  assert.deepEqual(workspace.lists[0].board, { groups: [], todos: [] });
-});
-
-test("expanding a completed task creates a group and recalculates dependencies", () => {
-  const board = fixture([["A", "B"]]);
-  finish(board, "A");
-  finish(board, "B");
-  const group = expandTodo(board, "A0");
-  assert.equal(group.title, "A0");
-  assert.deepEqual(group.prerequisiteIds, []);
-  assert.deepEqual(board.groups.find((item) => item.id === "B").prerequisiteIds, ["A", group.id]);
-  assert.equal(board.todos.some((todo) => todo.id === "A0"), false);
-  assert.equal(board.todos.find((todo) => todo.id === "B0").completed, false);
-  assert.equal(groupReady(board, "B"), false);
-  assert.equal(expandTodo(board, "missing"), undefined);
-});
-
-test("expanding a task shares all previous and next groups without changing siblings", () => {
-  const board = fixture([["A", "C"], ["B", "C"], ["C", "D"], ["C", "E"], ["X", "D"]], { C: 2 });
-  const group = expandTodo(board, "C0");
-  assert.deepEqual(group.prerequisiteIds, ["A", "B"]);
-  assert.deepEqual(board.groups.find((item) => item.id === "C").prerequisiteIds, ["A", "B"]);
-  assert.deepEqual(board.groups.find((item) => item.id === "D").prerequisiteIds, ["C", "X", group.id]);
-  assert.deepEqual(board.groups.find((item) => item.id === "E").prerequisiteIds, ["C", group.id]);
-  assert.equal(board.todos.some((todo) => todo.id === "C1"), true);
-  finish(board, "A");
-  finish(board, "B");
-  finish(board, "C");
-  finish(board, "X");
-  assert.equal(groupReady(board, "D"), false);
-  board.todos.push({ id: "new", groupId: group.id, title: "new", completed: false, createdAt: 0 });
-  toggleTodo(board, "new");
-  assert.equal(groupReady(board, "D"), true);
-  assert.equal(groupReady(board, "E"), true);
+  const old = workspace.lists[0];
+  old.board.todos.push({ id: "t", title: "t", completed: false, createdAt: 0, nextId: null });
+  archiveList(workspace, old.id);
+  assert.equal(workspace.lists.length, 2);
+  assert.equal(old.archived, true);
+  assert.equal(old.board.todos.length, 1);
+  assert.notEqual(workspace.activeListId, old.id);
+  assert.deepEqual(workspace.lists[1].board, { todos: [] });
 });

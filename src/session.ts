@@ -1,4 +1,3 @@
-export type Composer = { groupId: string; mode: "task" | "previous" | "next" };
 export type EditorState = {
   selector: string;
   value: string;
@@ -11,13 +10,12 @@ export type UiSession = {
   listId: string;
   pinned: boolean;
   scrollTop: number;
-  composer: Composer | null;
   editors: EditorState[];
 };
 
 export function captureEditors(): EditorState[] {
-  return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("#step-input, #list-name, [data-rename], [data-edit-todo]")).map((input) => ({
-    selector: input.id ? `#${input.id}` : input.dataset.rename ? `[data-rename="${input.dataset.rename}"]` : `[data-edit-todo="${input.dataset.editTodo}"]`,
+  return Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("#list-name, [data-edit-todo]")).map((input) => ({
+    selector: input.id ? `#${input.id}` : `[data-edit-todo="${input.dataset.editTodo}"]`,
     value: input.value, focused: document.activeElement === input,
     start: input.selectionStart, end: input.selectionEnd,
   }));

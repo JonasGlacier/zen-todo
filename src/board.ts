@@ -1,25 +1,24 @@
+// Every task has any number of previous steps but at most one next step
+// (`nextId`), so the dependencies form a forest converging on its roots.
 export type Todo = {
   id: string;
   title: string;
   completed: boolean;
   createdAt: number;
-  groupId: string;
-};
-
-export type Group = {
-  id: string;
-  title: string;
-  prerequisiteIds: string[];
+  nextId: string | null;
   collapsed?: boolean;
 };
 
-export type Board = { groups: Group[]; todos: Todo[] };
+export type Board = { todos: Todo[] };
 
-export type TodoList = { id: string; title: string; board: Board };
+export type TodoList = { id: string; title: string; board: Board; archived?: boolean };
 export type Workspace = { lists: TodoList[]; activeListId: string };
+export type DropPlace = "before" | "after" | "into";
+
+const find = (board: Board, id: string | null | undefined) => board.todos.find((todo) => todo.id === id);
 
 export function createList(title = "新列表"): TodoList {
-  return { id: crypto.randomUUID(), title, board: { groups: [], todos: [] } };
+  return { id: crypto.randomUUID(), title, board: { todos: [] }, archived: false };
 }
 
 export function createWorkspace(title = "我的待办"): Workspace {
@@ -27,75 +26,63 @@ export function createWorkspace(title = "我的待办"): Workspace {
   return { lists: [list], activeListId: list.id };
 }
 
-export function deleteList(workspace: Workspace, id: string, fallbackTitle = "我的待办"): void {
+// Archiving keeps the list; the active list always remains an unarchived one.
+export function archiveList(workspace: Workspace, id: string, fallbackTitle = "我的待办"): void {
   const index = workspace.lists.findIndex((list) => list.id === id);
   if (index < 0) return;
-  workspace.lists.splice(index, 1);
-  if (!workspace.lists.length) workspace.lists.push(createList(fallbackTitle));
+  workspace.lists[index].archived = true;
+  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(fallbackTitle));
   if (workspace.activeListId === id) {
-    workspace.activeListId = workspace.lists[Math.min(index, workspace.lists.length - 1)].id;
+    const next = workspace.lists.slice(index + 1).find((list) => !list.archived)
+      ?? workspace.lists.slice(0, index).reverse().find((list) => !list.archived)!;
+    workspace.activeListId = next.id;
   }
 }
 
-export function groupComplete(board: Board, id: string): boolean {
-  const tasks = board.todos.filter((todo) => todo.groupId === id);
-  // An empty step must not silently unlock its successors.
-  return tasks.length > 0 && tasks.every((todo) => todo.completed);
+export function restoreList(workspace: Workspace, id: string): void {
+  const list = workspace.lists.find((item) => item.id === id);
+  if (!list) return;
+  list.archived = false;
+  workspace.activeListId = id;
 }
 
-export function expandTodo(board: Board, id: string): Group | undefined {
-  const index = board.todos.findIndex((todo) => todo.id === id);
-  if (index < 0) return undefined;
-  const todo = board.todos[index];
-  const parentIndex = board.groups.findIndex((item) => item.id === todo.groupId);
-  const parent = board.groups[parentIndex];
-  const group: Group = { id: crypto.randomUUID(), title: todo.title, prerequisiteIds: [...(parent?.prerequisiteIds ?? [])], collapsed: false };
-  for (const successor of board.groups) {
-    if (successor.prerequisiteIds.includes(todo.groupId)) successor.prerequisiteIds.push(group.id);
+export function prerequisites(board: Board, id: string): Todo[] {
+  return board.todos.filter((todo) => todo.nextId === id);
+}
+
+export function countPrerequisites(board: Board, id: string): number {
+  return prerequisites(board, id).reduce((sum, todo) => sum + 1 + countPrerequisites(board, todo.id), 0);
+}
+
+export function isBlocked(board: Board, todo: Todo): boolean {
+  return board.todos.some((item) => item.nextId === todo.id && !item.completed);
+}
+
+// True when `id` is `ancestorId` or lies somewhere before it in the chain.
+function leadsTo(board: Board, id: string | null, goal: string): boolean {
+  const seen = new Set<string>();
+  let current = find(board, id);
+  while (current && !seen.has(current.id)) {
+    if (current.id === goal) return true;
+    seen.add(current.id);
+    current = find(board, current.nextId);
   }
-  board.groups.splice(parentIndex < 0 ? board.groups.length : parentIndex + 1, 0, group);
-  board.todos.splice(index, 1);
-  reconcile(board);
-  return group;
+  return false;
 }
 
-export function groupReady(board: Board, id: string, visiting = new Set<string>()): boolean {
-  const group = board.groups.find((item) => item.id === id);
-  if (!group || visiting.has(id)) return false;
-  const path = new Set(visiting).add(id);
-  return group.prerequisiteIds.every((previous) =>
-    groupComplete(board, previous) && groupReady(board, previous, path));
-}
-
-export function canLink(board: Board, previous: string, next: string): boolean {
-  if (previous === next || !board.groups.some((g) => g.id === previous)) return false;
-  const target = board.groups.find((group) => group.id === next);
-  if (!target || target.prerequisiteIds.includes(previous)) return false;
-  const visited = new Set<string>();
-  const reachesNext = (id: string): boolean => {
-    if (id === next) return true;
-    if (visited.has(id)) return false;
-    visited.add(id);
-    return board.groups.find((group) => group.id === id)?.prerequisiteIds.some(reachesNext) ?? false;
-  };
-  return !reachesNext(previous);
-}
-
-export function linkGroups(board: Board, previous: string, next: string): boolean {
-  if (!canLink(board, previous, next)) return false;
-  board.groups.find((group) => group.id === next)!.prerequisiteIds.push(previous);
-  reconcile(board);
-  return true;
+export function canLink(board: Board, previousId: string, nextId: string): boolean {
+  const previous = find(board, previousId);
+  if (!previous || !find(board, nextId) || previousId === nextId || previous.nextId === nextId) return false;
+  return !leadsTo(board, nextId, previousId);
 }
 
 export function reconcile(board: Board): number {
   let reset = 0;
-  // Repeat because invalid completed steps can occur in any storage order.
   let changed: boolean;
   do {
     changed = false;
     for (const todo of board.todos) {
-      if (todo.completed && !groupReady(board, todo.groupId)) {
+      if (todo.completed && isBlocked(board, todo)) {
         todo.completed = false;
         changed = true;
         reset++;
@@ -105,26 +92,98 @@ export function reconcile(board: Board): number {
   return reset;
 }
 
-export function toggleTodo(board: Board, id: string): number {
-  const todo = board.todos.find((item) => item.id === id);
-  if (!todo || (!todo.completed && !groupReady(board, todo.groupId))) return 0;
-  todo.completed = !todo.completed;
-  return reconcile(board);
-}
-
-export function removeGroups(board: Board, ids: Set<string>) {
-  board.groups = board.groups.filter((group) => !ids.has(group.id));
-  board.todos = board.todos.filter((todo) => !ids.has(todo.groupId));
-  for (const group of board.groups) {
-    group.prerequisiteIds = group.prerequisiteIds.filter((id) => !ids.has(id));
+export function normalize(board: Board): void {
+  const ids = new Set(board.todos.map((todo) => todo.id));
+  for (const todo of board.todos) {
+    todo.nextId = todo.nextId && todo.nextId !== todo.id && ids.has(todo.nextId) ? todo.nextId : null;
+  }
+  for (const todo of board.todos) {
+    const seen = new Set([todo.id]);
+    let current = todo;
+    while (current.nextId) {
+      if (seen.has(current.nextId)) { current.nextId = null; break; }
+      seen.add(current.nextId);
+      current = find(board, current.nextId)!;
+    }
   }
   reconcile(board);
 }
 
-export function clearCompleted(board: Board) {
-  // Remove fully completed steps and their links before removing their tasks.
-  const complete = new Set(board.groups.filter((group) => groupComplete(board, group.id)).map((group) => group.id));
-  removeGroups(board, complete);
-  board.todos = board.todos.filter((todo) => !todo.completed);
+export function toggleTodo(board: Board, id: string): number {
+  const todo = find(board, id);
+  if (!todo || (!todo.completed && isBlocked(board, todo))) return 0;
+  todo.completed = !todo.completed;
+  return reconcile(board);
+}
+
+export function addTodo(board: Board, title = "", nextId: string | null = null, id: string = crypto.randomUUID()): Todo {
+  const next = find(board, nextId);
+  const todo: Todo = { id, title, completed: false, createdAt: Date.now(), nextId: next ? next.id : null };
+  board.todos.push(todo);
+  if (next) next.collapsed = false;
   reconcile(board);
+  return todo;
+}
+
+// Same next step as `afterId`, placed right after it among its siblings.
+export function addSibling(board: Board, afterId: string, id: string = crypto.randomUUID()): Todo | undefined {
+  const after = find(board, afterId);
+  if (!after) return undefined;
+  const todo: Todo = { id, title: "", completed: false, createdAt: Date.now(), nextId: after.nextId };
+  board.todos.splice(board.todos.indexOf(after) + 1, 0, todo);
+  reconcile(board);
+  return todo;
+}
+
+export function linkTodos(board: Board, previousId: string, nextId: string): boolean {
+  if (!canLink(board, previousId, nextId)) return false;
+  find(board, previousId)!.nextId = nextId;
+  find(board, nextId)!.collapsed = false;
+  reconcile(board);
+  return true;
+}
+
+// Previous steps of a removed task move on to its next step.
+export function removeTodo(board: Board, id: string): void {
+  const todo = find(board, id);
+  if (!todo) return;
+  for (const previous of prerequisites(board, id)) previous.nextId = todo.nextId;
+  board.todos.splice(board.todos.indexOf(todo), 1);
+  reconcile(board);
+}
+
+export function indentTodo(board: Board, id: string): boolean {
+  const todo = find(board, id);
+  if (!todo) return false;
+  const siblings = board.todos.filter((item) => item.nextId === todo.nextId);
+  const target = siblings[siblings.indexOf(todo) + 1];
+  return target ? linkTodos(board, id, target.id) : false;
+}
+
+export function outdentTodo(board: Board, id: string): boolean {
+  const todo = find(board, id);
+  const parent = find(board, todo?.nextId);
+  if (!todo || !parent) return false;
+  todo.nextId = parent.nextId;
+  board.todos.splice(board.todos.indexOf(todo), 1);
+  board.todos.splice(board.todos.indexOf(parent), 0, todo);
+  reconcile(board);
+  return true;
+}
+
+export function canMove(board: Board, id: string, targetId: string, place: DropPlace): boolean {
+  if (id === targetId || !find(board, id) || !find(board, targetId)) return false;
+  return place === "into" ? canLink(board, id, targetId) : !leadsTo(board, targetId, id);
+}
+
+export function moveTodo(board: Board, id: string, targetId: string, place: DropPlace): boolean {
+  if (!canMove(board, id, targetId, place)) return false;
+  if (place === "into") return linkTodos(board, id, targetId);
+  const todo = find(board, id)!;
+  const target = find(board, targetId)!;
+  todo.nextId = target.nextId;
+  board.todos.splice(board.todos.indexOf(todo), 1);
+  board.todos.splice(board.todos.indexOf(target) + (place === "after" ? 1 : 0), 0, todo);
+  reconcile(board);
+  return true;
 }

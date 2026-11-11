@@ -1,11 +1,14 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { canLink, clearCompleted, createList, createWorkspace, deleteList, expandTodo, groupComplete, groupReady, linkGroups, reconcile, removeGroups, toggleTodo } from "./board";
-import type { Board, Group, Todo, Workspace } from "./board";
+import {
+  addSibling, addTodo, archiveList, canMove, countPrerequisites, createList, createWorkspace, indentTodo, isBlocked,
+  moveTodo, normalize, outdentTodo, prerequisites, reconcile, removeTodo, restoreList, toggleTodo,
+} from "./board";
+import type { Board, DropPlace, Todo, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
 import { captureEditors, restoreEditors } from "./session";
-import type { Composer, UiSession } from "./session";
+import type { UiSession } from "./session";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -15,8 +18,8 @@ let board: Board = workspace.lists[0].board;
 let pinned = true;
 let pendingChange = Promise.resolve();
 let message = "";
-let composer: Composer | null = null;
 let draggedId: string | null = null;
+let showArchive = false;
 let settingsWindow: Window | null = null;
 let openingSettings = false;
 let suspending = false;
@@ -26,17 +29,9 @@ let saveFailures = 0;
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]!);
-const name = (id: string) => board.groups.find((group) => group.id === id)?.title || t("unnamedGroup");
-
-function newGroup(title = ""): Group {
-  const group = { id: crypto.randomUUID(), title, prerequisiteIds: [], collapsed: false };
-  board.groups.push(group);
-  return group;
-}
-
-function newTodo(title: string, groupId: string) {
-  board.todos.push({ id: crypto.randomUUID(), title, groupId, completed: false, createdAt: Date.now() });
-}
+const activeList = () => workspace.lists.find((list) => list.id === workspace.activeListId)!;
+const editorId = (id: string) => `todo-${id}`;
+const titleOf = (input: HTMLTextAreaElement) => input.value.replace(/[\r\n]+/g, " ").trim();
 
 async function persist() {
   if (isTauri()) await invoke("save_board", { board: workspace });
@@ -53,13 +48,13 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
       mutate();
       reconcile(board);
       const reset = previousBoard.todos.filter((todo) => todo.completed && board.todos.some((current) =>
-        current.id === todo.id && !current.completed && !groupReady(board, current.groupId))).length;
+        current.id === todo.id && !current.completed && isBlocked(board, current))).length;
       if (reset) message = t("resetTasks", { count: reset });
       await persist();
     } catch (error) {
       saveFailures++;
       workspace = previous;
-      board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
+      board = activeList().board;
       message = t("saveFailed");
       console.error(error);
     } finally {
@@ -69,102 +64,80 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
         notice.textContent = message;
         notice.classList.toggle("visible", Boolean(message));
       }
-      if (focus) document.getElementById(focus)?.focus();
+      if (focus) {
+        const target = document.getElementById(focus);
+        target?.focus();
+        target?.scrollIntoView({ block: "nearest" });
+      }
     }
   });
   pendingChange = operation.catch(console.error);
   return operation;
 }
 
-function todoTemplate(todo: Todo, ready: boolean) {
-  return `<div class="todo ${todo.completed ? "is-completed" : ""}" data-todo="${todo.id}">
+function todoRow(todo: Todo, collapsed: boolean, hasPrevious: boolean): string {
+  const blocked = isBlocked(board, todo);
+  const label = escapeHtml(todo.title);
+  return `<div class="todo ${todo.completed ? "is-completed" : ""} ${blocked ? "is-blocked" : ""}" data-todo="${todo.id}">
     <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
+    <button class="fold-button ${hasPrevious ? "" : "is-empty"} ${collapsed ? "" : "is-expanded"}" data-action="fold" data-id="${todo.id}" title="${t(collapsed ? "expandSteps" : "collapseSteps")}" aria-label="${t(collapsed ? "expandSteps" : "collapseSteps")}" aria-expanded="${!collapsed}" ${hasPrevious ? "" : "tabindex=\"-1\" aria-hidden=\"true\""}>${icon("chevron")}</button>
     <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}"
-      ${!ready ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
-      title="${ready ? "" : t("prerequisitesFirst")}">${todo.completed ? icon("check") : ""}</button>
-    <textarea class="todo-title" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" rows="1" maxlength="200" spellcheck="false">${escapeHtml(todo.title)}</textarea>
-    <button class="expand-task" data-action="expand-task" data-id="${todo.id}" title="${t("expandTodo")}" aria-label="${escapeHtml(t("expandNamedTodo", { title: todo.title }))}">${icon("expandTask")}</button>
+      ${blocked ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
+      title="${blocked ? t("prerequisitesFirst") : ""}">${todo.completed ? icon("check") : ""}</button>
+    <textarea class="todo-title" id="${editorId(todo.id)}" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" placeholder="${t("todoPlaceholder")}" rows="1" maxlength="200" spellcheck="false">${label}</textarea>
+    ${collapsed ? `<span class="hidden-count">${t("hiddenSteps", { count: countPrerequisites(board, todo.id) })}</span>` : ""}
+    <button class="row-action" data-action="add-previous" data-id="${todo.id}" title="${t("addPrevious")}" aria-label="${escapeHtml(t("addPreviousNamed", { title: todo.title }))}">${icon("previous")}</button>
     <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
   </div>`;
 }
 
-function composerTemplate(group: Group) {
-  if (composer?.groupId !== group.id) return "";
-  const mode = composer.mode;
-  const candidates = mode === "task" ? [] : board.groups.filter((candidate) =>
-    mode === "previous" ? canLink(board, candidate.id, group.id) : canLink(board, group.id, candidate.id));
-  return `<${mode === "task" ? 'form id="step-form"' : "div"} class="inline-form" data-group="${group.id}" data-mode="${mode}">
-    <div class="composer-heading">${t(mode === "task" ? "addTodo" : mode === "previous" ? "addPrevious" : "addNext")}<button type="button" data-action="close-composer" aria-label="${t("cancel")}">${icon("close")}</button></div>
-    ${mode === "task" ? `<div class="input-line"><input id="step-input" aria-label="${t("todoName")}" placeholder="${t("todoPlaceholder")}" autocomplete="off" required maxlength="200"/><button type="submit">${t("add")}</button></div>` : `<button class="create-step" data-action="create-${mode}" data-id="${group.id}">${icon("plus")} ${t("newGroup")}</button>`}
-    ${mode === "task" ? "" : `<p class="hint">${t(mode === "previous" ? "previousHint" : "nextHint")}</p>
-    ${candidates.length ? `<div class="existing"><span>${t("linkExisting")}</span>${candidates.map((candidate) => `<button type="button" data-action="link-${mode}" data-id="${candidate.id}" data-group="${group.id}"><span data-group-label="${candidate.id}">${escapeHtml(name(candidate.id))}</span>${icon("plus")}</button>`).join("")}</div>` : ""}
-    ${group.prerequisiteIds.length ? `<div class="existing"><span>${t("linkedPrevious")}</span>${group.prerequisiteIds.map((id) => `<button type="button" data-action="unlink" data-id="${id}" data-group="${group.id}" title="${t("unlinkHint")}"><span data-group-label="${id}">${escapeHtml(name(id))}</span>${icon("close")}</button>`).join("")}</div>` : ""}`}
-  </${mode === "task" ? "form" : "div"}>`;
+// Previous steps are drawn indented above the task they lead to.
+function nodeTemplate(todo: Todo): string {
+  const previous = prerequisites(board, todo.id);
+  const collapsed = Boolean(todo.collapsed) && previous.length > 0;
+  return `<div class="node" id="node-${todo.id}">${previous.length && !collapsed ? `<div class="children">${previous.map(nodeTemplate).join("")}</div>` : ""}${todoRow(todo, collapsed, previous.length > 0)}</div>`;
 }
 
-function groupTemplate(group: Group, owner: Map<string, string>, depth = 0): string {
-  const ready = groupReady(board, group.id);
-  const complete = groupComplete(board, group.id);
-  const collapsed = group.collapsed ?? false;
-  const tasks = board.todos.filter((todo) => todo.groupId === group.id);
-  const done = tasks.filter((todo) => todo.completed).length;
-  const predecessors = group.prerequisiteIds.map((id) => {
-    const previous = board.groups.find((item) => item.id === id);
-    if (!previous) return "";
-    if (owner.get(id) === group.id) return groupTemplate(previous, owner, depth + 1);
-    return `<button class="shared-step ${groupComplete(board, id) ? "is-done" : ""}" data-action="jump" data-id="${id}" title="${t("locatePrevious")}">${icon(groupComplete(board, id) ? "check" : "jump")} <span data-group-label="${id}">${escapeHtml(name(id))}</span><span class="shared-caption">${t("sharedPrevious")}</span></button>`;
-  }).join("");
-  return `<section class="step ${complete ? "step-complete" : ""} ${depth > 5 ? "deep-step" : ""}" id="group-${group.id}" aria-label="${escapeHtml(name(group.id))}">
-    ${predecessors ? `<div class="previous-steps">${predecessors}</div>` : ""}
-    <div class="group-body ${!ready ? "is-blocked" : ""}">
-      <header class="group-header">
-        <button class="fold-button ${collapsed ? "" : "is-expanded"}" id="fold-${group.id}" data-action="fold" data-id="${group.id}" title="${t(collapsed ? "expandGroup" : "collapseGroup")}" aria-label="${escapeHtml(t(collapsed ? "expandNamedGroup" : "collapseNamedGroup", { title: name(group.id) }))}" aria-expanded="${!collapsed}" aria-controls="content-${group.id}">${icon("chevron")}</button>
-        <input class="group-name" value="${escapeHtml(group.title)}" placeholder="${t("optionalGroupName")}" aria-label="${t("optionalGroupName")}" data-rename="${group.id}" maxlength="80" />
-        <span class="group-count" title="${t(complete ? "groupDone" : "groupProgress")}">${done}/${tasks.length}</span>
-        <div class="group-tools" role="group" aria-label="${t("groupActions")}">
-          <button data-action="task" data-id="${group.id}" title="${t("addTodo")}" aria-label="${t("addTodo")}">${icon("task")}</button>
-          <button data-action="previous" data-id="${group.id}" title="${t("addPrevious")}" aria-label="${t("addPrevious")}">${icon("previous")}</button>
-          <button data-action="next" data-id="${group.id}" title="${t("addNext")}" aria-label="${t("addNext")}">${icon("next")}</button>
-          <button class="danger" data-action="delete-group" data-id="${group.id}" title="${t("deleteGroup")}" aria-label="${t("deleteGroup")}">${icon("delete")}</button>
-        </div>
-      </header>
-      <div class="group-content" id="content-${group.id}" ${collapsed ? "hidden" : ""}>
-        ${collapsed ? "" : `<div class="tasks">${tasks.map((todo) => todoTemplate(todo, ready)).join("")}</div>
-        ${composer?.groupId === group.id ? composerTemplate(group) : tasks.length ? "" : `<button class="add-task" data-action="task" data-id="${group.id}">${icon("plus")} ${t("firstTodo")}</button>`}`}
-      </div>
-    </div>
-  </section>`;
+function archiveTemplate(): string {
+  const archived = workspace.lists.filter((list) => list.archived);
+  return `<div class="list archive-panel" id="todo-list">
+    <div class="archive-heading">${t("archivedLists")}</div>
+    ${archived.length ? archived.map((list) => {
+      const done = list.board.todos.filter((todo) => todo.completed).length;
+      return `<details class="archived-list"><summary><span class="archived-name">${escapeHtml(list.title)}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span><button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button></summary>
+        <ul class="archived-tasks">${list.board.todos.length ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("") : `<li class="muted">${t("emptyArchivedList")}</li>`}</ul></details>`;
+    }).join("") : `<p class="muted archive-empty">${t("archivedEmpty")}</p>`}
+  </div>`;
 }
 
 function render() {
   document.documentElement.lang = getLanguage();
   const listScroll = document.querySelector(".list")?.scrollTop ?? 0;
-  const activeList = workspace.lists.find((list) => list.id === workspace.activeListId)!;
+  const list = activeList();
+  const visibleLists = workspace.lists.filter((item) => !item.archived);
+  const archivedCount = workspace.lists.length - visibleLists.length;
   const pending = board.todos.filter((todo) => !todo.completed);
-  const available = pending.filter((todo) => groupReady(board, todo.groupId)).length;
+  const available = pending.filter((todo) => !isBlocked(board, todo)).length;
   const completed = board.todos.length - pending.length;
-  // Each prerequisite gets one full rendering; other successors point to it.
-  const owner = new Map<string, string>();
-  for (const group of board.groups) for (const id of group.prerequisiteIds) {
-    if (!owner.has(id)) owner.set(id, group.id);
-  }
-  const roots = board.groups.filter((group) => !owner.has(group.id));
+  const roots = board.todos.filter((todo) => todo.nextId === null);
+  const content = showArchive ? archiveTemplate() : `<div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
+      <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
+      <button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
+    </div>`;
   app.innerHTML = `<section class="shell">
     <div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
-    <header class="controls" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(activeList.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime")}</span></div>
+    <header class="controls" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime")}</span></div>
       <div class="window-actions"><button class="icon-button" id="organize-button" title="${t("organize")}" aria-label="${t("organize")}">${icon("organize")}</button><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
     </header>
     <div class="workspace">
-    <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map((group) => groupTemplate(group, owner)).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
-      <button class="new-group-button" id="new-group-button">${icon("plus")} ${t("newGroup")}</button>
-      <button class="delete-list-button" id="delete-list" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button>
-    </div>
+    ${content}
     <div class="tabs-bar">
-      <div class="tabs" role="tablist" aria-label="${t("todoLists")}">${workspace.lists.map((list) => `<button class="tab ${list.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${list.id === workspace.activeListId}" aria-controls="todo-list" data-list="${list.id}" title="${escapeHtml(list.title)}">${escapeHtml(list.title)}</button>`).join("")}</div>
+      <div class="tabs" role="tablist" aria-label="${t("todoLists")}">${visibleLists.map((item) => `<button class="tab ${!showArchive && item.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${!showArchive && item.id === workspace.activeListId}" aria-controls="todo-list" data-list="${item.id}" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>`).join("")}</div>
       <button class="tab-action" id="new-list" title="${t("newList")}" aria-label="${t("newList")}">${icon("plus")}</button>
+      <button class="tab-action ${showArchive ? "is-active" : ""}" id="archive-toggle" title="${t("archived")}${archivedCount ? ` · ${archivedCount}` : ""}" aria-label="${t("archived")}" aria-pressed="${showArchive}">${icon("archive")}</button>
     </div>
     </div>
-    <footer class="footer"><span>${t("footer", { groups: t(board.groups.length === 1 ? "oneGroup" : "manyGroups", { count: board.groups.length }), count: pending.length })}</span>${completed ? `<button id="clear-completed">${t("clearCompleted", { count: completed })}</button>` : `<span>${t("stayFocused")}</span>`}</footer>
+    <footer class="footer"><span>${t("footer", { count: pending.length })}</span><span>${t("stayFocused")}</span></footer>
     <div class="notice ${message ? "visible" : ""}" role="status">${escapeHtml(message)}</div>
   </section>`;
   bindEvents();
@@ -213,9 +186,6 @@ function refreshLanguage() {
 function restoreSession(session: UiSession | null) {
   if (session?.version !== 1) return;
   pinned = session.pinned;
-  if (session.listId !== workspace.activeListId) return;
-  const target = board.groups.find((group) => group.id === session.composer?.groupId);
-  composer = target && !target.collapsed ? session.composer : null;
 }
 
 function restoreSessionEditors(session: UiSession | null) {
@@ -228,17 +198,13 @@ async function suspendToTray() {
   if (!isTauri() || suspending) return;
   suspending = true;
   const failures = saveFailures;
-  const form = document.querySelector<HTMLElement>(".inline-form");
-  const mode = form?.dataset.mode;
-  const renderedComposer: Composer | null = form?.dataset.group && (mode === "task" || mode === "previous" || mode === "next")
-    ? { groupId: form.dataset.group, mode } : null;
   const session: UiSession | null = initialized ? {
     version: 1, listId: document.querySelector<HTMLElement>(".tab.is-selected")?.dataset.list ?? workspace.activeListId, pinned,
     scrollTop: document.querySelector(".list")?.scrollTop ?? 0,
-    composer: renderedComposer, editors: captureEditors(),
+    editors: captureEditors(),
   } : null;
-  // Capture before blur: it commits existing edits but leaves new-task drafts
-  // in the session. Never tear down a WebView while a save is still pending.
+  // Capture before blur: it commits existing edits. Never tear down a WebView
+  // while a save is still pending.
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   app.inert = true;
   try {
@@ -262,59 +228,90 @@ async function suspendToTray() {
   }
 }
 
-function openComposer(groupId: string, mode: "task" | "previous" | "next") {
-  void change(() => {
-    board.groups.find((group) => group.id === groupId)!.collapsed = false;
-    composer = { groupId, mode };
-  }).then(() => {
-    document.querySelector<HTMLElement>("#step-input, .inline-form .create-step")?.focus();
-    document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
-  });
-}
-
 function handleAction(button: HTMLButtonElement) {
-  const { action, id = "", group: groupId = "" } = button.dataset;
-  if (action === "close-composer") { composer = null; render(); return; }
-  if (action === "task" || action === "previous" || action === "next") { openComposer(id, action); return; }
-  if (action === "jump") {
-    void change(() => { board.groups.find((group) => group.id === id)!.collapsed = false; }).then(() => {
-      const target = document.getElementById(`group-${id}`);
-      target?.querySelector(":scope > .group-body")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      document.getElementById(`fold-${id}`)?.focus({ preventScroll: true });
-      requestAnimationFrame(() => target?.classList.add("highlight"));
+  const { action, id = "" } = button.dataset;
+  if (action === "add-previous") {
+    const newId = crypto.randomUUID();
+    void change(() => { addTodo(board, "", id, newId); }, editorId(newId));
+    return;
+  }
+  if (action === "restore") {
+    void change(() => {
+      restoreList(workspace, id);
+      board = activeList().board;
+      showArchive = false;
     });
     return;
   }
   void change(() => {
     if (action === "fold") {
-      const group = board.groups.find((group) => group.id === id)!;
-      group.collapsed = !group.collapsed;
-      if (group.collapsed && composer?.groupId === id) composer = null;
-    } else if (action === "create-previous" || action === "create-next") {
-      const group = newGroup();
-      linkGroups(board, action === "create-previous" ? group.id : id, action === "create-previous" ? id : group.id);
-      composer = { groupId: group.id, mode: "task" };
+      const todo = board.todos.find((item) => item.id === id)!;
+      todo.collapsed = !todo.collapsed;
     } else if (action === "toggle") {
       const reset = toggleTodo(board, id);
       if (reset) message = t("resetTasks", { count: reset });
     } else if (action === "delete-task") {
-      board.todos = board.todos.filter((todo) => todo.id !== id);
-    } else if (action === "expand-task") {
-      const group = expandTodo(board, id);
-      if (group) composer = { groupId: group.id, mode: "task" };
-    } else if (action === "delete-group") {
-      removeGroups(board, new Set([id]));
-      if (composer?.groupId === id) composer = null;
-    } else if (action === "unlink") {
-      const group = board.groups.find((item) => item.id === groupId)!;
-      group.prerequisiteIds = group.prerequisiteIds.filter((previous) => previous !== id);
-    } else if (action === "link-previous" || action === "link-next") {
-      linkGroups(board, action === "link-previous" ? id : groupId, action === "link-previous" ? groupId : id);
-      composer = null;
+      removeTodo(board, id);
+    } else if (action === "archive-list") {
+      archiveList(workspace, workspace.activeListId, t("myTodos"));
+      board = activeList().board;
+      draggedId = null;
     }
-  }, action === "fold" ? `fold-${id}` : action === "create-previous" || action === "create-next" || action === "expand-task" ? "step-input" : undefined).then(() => {
-    if (action === "create-previous" || action === "create-next" || action === "expand-task") document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" });
   });
+}
+
+function focusSibling(input: HTMLTextAreaElement, offset: number) {
+  const editors = Array.from(document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]"));
+  const target = editors[editors.indexOf(input) + offset];
+  if (!target) return;
+  target.focus();
+  target.setSelectionRange(target.value.length, target.value.length);
+}
+
+// Keyboard editing: Enter adds a sibling, Tab/Shift+Tab nest or lift a task.
+function handleTodoKey(input: HTMLTextAreaElement, event: KeyboardEvent) {
+  if (event.isComposing) return;
+  const id = input.dataset.editTodo!;
+  const todo = board.todos.find((item) => item.id === id);
+  if (!todo) return;
+  const commit = () => { const title = titleOf(input); if (title) todo.title = title; };
+  if (event.key === "Enter" && !event.shiftKey) {
+    event.preventDefault();
+    if (!titleOf(input)) return;
+    const newId = crypto.randomUUID();
+    void change(() => { commit(); addSibling(board, id, newId); }, editorId(newId));
+  } else if (event.key === "Tab") {
+    event.preventDefault();
+    if (!titleOf(input)) return;
+    void change(() => {
+      commit();
+      if (event.shiftKey) outdentTodo(board, id); else indentTodo(board, id);
+    }, editorId(id));
+  } else if (event.key === "Backspace" && !input.value && !todo.title) {
+    event.preventDefault();
+    focusSibling(input, -1);
+    void change(() => { removeTodo(board, id); });
+  } else if (event.key === "ArrowUp" && input.selectionStart === 0 && input.selectionEnd === 0) {
+    event.preventDefault();
+    focusSibling(input, -1);
+  } else if (event.key === "ArrowDown" && input.selectionStart === input.value.length) {
+    event.preventDefault();
+    focusSibling(input, 1);
+  } else if (event.key === "Escape") {
+    event.stopPropagation();
+    input.value = todo.title;
+    input.blur();
+  }
+}
+
+function dropPlace(row: HTMLElement, event: DragEvent): DropPlace {
+  const { top, height } = row.getBoundingClientRect();
+  const ratio = (event.clientY - top) / height;
+  return ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "into";
+}
+
+function clearDropMarks() {
+  document.querySelectorAll(".is-dragging, .drop-before, .drop-after, .drop-into").forEach((node) => node.classList.remove("is-dragging", "drop-before", "drop-after", "drop-into"));
 }
 
 function bindEvents() {
@@ -322,13 +319,13 @@ function bindEvents() {
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
       const id = tab.dataset.list!;
-      if (id === workspace.activeListId) return;
+      if (id === workspace.activeListId && !showArchive) return;
       void change(() => {
         const list = workspace.lists.find((item) => item.id === id);
-        if (!list) return;
+        if (!list || list.archived) return;
         workspace.activeListId = id;
         board = list.board;
-        composer = null;
+        showArchive = false;
         draggedId = null;
       });
     });
@@ -339,9 +336,12 @@ function bindEvents() {
       workspace.lists.push(list);
       workspace.activeListId = list.id;
       board = list.board;
-      composer = null;
+      showArchive = false;
       draggedId = null;
     });
+  });
+  document.querySelector("#archive-toggle")!.addEventListener("click", () => {
+    void change(() => { showArchive = !showArchive; draggedId = null; });
   });
   const listName = document.querySelector<HTMLInputElement>("#list-name")!;
   const listId = workspace.activeListId;
@@ -370,75 +370,13 @@ function bindEvents() {
       listName.blur();
     }
   });
-  const deleteButton = document.querySelector<HTMLButtonElement>("#delete-list")!;
-  let holdTimer: ReturnType<typeof setTimeout> | undefined;
-  const cancelHold = () => {
-    clearTimeout(holdTimer);
-    holdTimer = undefined;
-    deleteButton.classList.remove("is-holding");
-  };
-  const startHold = () => {
-    if (holdTimer) return;
-    deleteButton.classList.add("is-holding");
-    holdTimer = setTimeout(() => {
-      holdTimer = undefined;
-      deleteButton.classList.remove("is-holding");
-      if (!deleteButton.isConnected) return;
-      void change(() => {
-        if (workspace.activeListId !== listId) return;
-        deleteList(workspace, listId, t("myTodos"));
-        board = workspace.lists.find((item) => item.id === workspace.activeListId)!.board;
-        composer = null;
-        draggedId = null;
-      });
-    }, 1500);
-  };
-  deleteButton.addEventListener("pointerdown", (event) => { if (event.button === 0) startHold(); });
-  for (const event of ["pointerup", "pointerleave", "pointercancel", "blur"] as const) deleteButton.addEventListener(event, cancelHold);
-  deleteButton.addEventListener("keydown", (event) => {
-    if (event.key === " " || event.key === "Enter") { event.preventDefault(); startHold(); }
-  });
-  deleteButton.addEventListener("keyup", (event) => {
-    if (event.key === " " || event.key === "Enter") { event.preventDefault(); cancelHold(); }
-  });
   document.querySelectorAll<HTMLButtonElement>("[data-action]").forEach((button) => {
-    button.addEventListener("click", () => handleAction(button));
+    // Restore buttons live inside <summary>; keep the click from toggling it.
+    button.addEventListener("click", (event) => { event.preventDefault(); handleAction(button); });
   });
-  document.querySelector("#new-group-button")!.addEventListener("click", () => {
-    void change(() => {
-      const group = newGroup();
-      composer = { groupId: group.id, mode: "task" };
-    }, "step-input").then(() => document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" }));
-  });
-  document.querySelector<HTMLFormElement>("#step-form")?.addEventListener("submit", (event) => {
-    event.preventDefault();
-    const title = document.querySelector<HTMLInputElement>("#step-input")!.value.trim();
-    if (!title || !composer) return;
-    const { groupId } = composer;
-    void change(() => {
-      newTodo(title, groupId);
-    }, "step-input").then(() => document.querySelector(".inline-form")?.scrollIntoView({ block: "nearest" }));
-  });
-  document.querySelectorAll<HTMLInputElement>("[data-rename]").forEach((input) => {
-    input.addEventListener("blur", () => {
-      const id = input.dataset.rename!;
-      const title = input.value.trim();
-      if (title === board.groups.find((group) => group.id === id)?.title) return;
-      void change(() => { board.groups.find((group) => group.id === id)!.title = title; }, undefined, false).then(() => {
-        if (document.activeElement !== input) input.value = board.groups.find((group) => group.id === id)?.title ?? "";
-        document.getElementById(`group-${id}`)?.setAttribute("aria-label", name(id));
-        document.querySelectorAll<HTMLElement>("[data-group-label]").forEach((label) => { label.textContent = name(label.dataset.groupLabel!); });
-      });
-    });
-    input.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
-      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        input.value = board.groups.find((group) => group.id === input.dataset.rename)?.title ?? "";
-        input.blur();
-      }
-    });
+  document.querySelector("#new-task-button")?.addEventListener("click", () => {
+    const newId = crypto.randomUUID();
+    void change(() => { addTodo(board, "", null, newId); }, editorId(newId));
   });
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach((input) => {
     input.addEventListener("input", () => resizeTodo(input));
@@ -446,7 +384,9 @@ function bindEvents() {
       const id = input.dataset.editTodo!;
       const todo = board.todos.find((item) => item.id === id);
       if (!todo) return;
-      const title = input.value.replace(/[\r\n]+/g, " ").trim();
+      const title = titleOf(input);
+      // A brand-new task that was left empty is discarded.
+      if (!title && !todo.title) { void change(() => { removeTodo(board, id); }); return; }
       if (!title || title === todo.title) { input.value = todo.title; resizeTodo(input); return; }
       // Keep the DOM intact so saving on blur doesn't swallow the next click.
       void change(() => { board.todos.find((item) => item.id === id)!.title = title; }, undefined, false).then(() => {
@@ -457,29 +397,15 @@ function bindEvents() {
         const row = input.closest(".todo")!;
         row.querySelector(".check")?.setAttribute("aria-label", t("taskLabel", { action: t(saved.completed ? "undoComplete" : "complete"), title: saved.title }));
         row.querySelector(".delete")?.setAttribute("aria-label", t("deleteNamedTodo", { title: saved.title }));
-        row.querySelector(".expand-task")?.setAttribute("aria-label", t("expandNamedTodo", { title: saved.title }));
+        row.querySelector(".row-action")?.setAttribute("aria-label", t("addPreviousNamed", { title: saved.title }));
         resizeTodo(input);
       });
     });
-    input.addEventListener("keydown", (event) => {
-      if (event.isComposing) return;
-      if (event.key === "Enter") { event.preventDefault(); input.blur(); }
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        input.value = board.todos.find((todo) => todo.id === input.dataset.editTodo)?.title ?? "";
-        input.blur();
-      }
-    });
-  });
-  document.querySelector("#clear-completed")?.addEventListener("click", () => {
-    void change(() => { clearCompleted(board); composer = null; });
+    input.addEventListener("keydown", (event) => handleTodoKey(input, event));
   });
   document.querySelector("#organize-button")!.addEventListener("click", () => {
     void change(() => {
-      for (const group of board.groups) {
-        group.collapsed = groupComplete(board, group.id) || !groupReady(board, group.id);
-      }
-      if (composer && board.groups.find((group) => group.id === composer!.groupId)?.collapsed) composer = null;
+      for (const todo of board.todos) todo.collapsed = todo.completed && prerequisites(board, todo.id).length > 0;
     }, "organize-button");
   });
   document.querySelector("#pin-button")!.addEventListener("click", () => {
@@ -507,37 +433,32 @@ function bindEvents() {
       draggedId = handle.dataset.drag!;
       event.dataTransfer?.setData("text/plain", draggedId);
       if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-      handle.closest(".todo")?.classList.add("is-dragging");
+      const row = handle.closest<HTMLElement>(".todo");
+      row?.classList.add("is-dragging");
+      if (row) event.dataTransfer?.setDragImage(row, 0, 0);
     });
-    handle.addEventListener("dragend", () => { draggedId = null; document.querySelectorAll(".is-dragging, .drop-target").forEach((node) => node.classList.remove("is-dragging", "drop-target")); });
+    handle.addEventListener("dragend", () => { draggedId = null; clearDropMarks(); });
   });
   document.querySelectorAll<HTMLElement>("[data-todo]").forEach((row) => {
     row.addEventListener("dragover", (event) => {
-      const source = board.todos.find((todo) => todo.id === draggedId);
-      const target = board.todos.find((todo) => todo.id === row.dataset.todo);
-      if (!source || source.id === target?.id || source.groupId !== target?.groupId) return;
+      if (!draggedId) return;
+      const place = dropPlace(row, event);
+      row.classList.remove("drop-before", "drop-after", "drop-into");
+      if (!canMove(board, draggedId, row.dataset.todo!, place)) return;
       event.preventDefault();
-      row.classList.add("drop-target");
+      row.classList.add(`drop-${place}`);
     });
-    row.addEventListener("dragleave", () => row.classList.remove("drop-target"));
+    row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after", "drop-into"));
     row.addEventListener("drop", (event) => {
       event.preventDefault();
-      const source = board.todos.find((todo) => todo.id === draggedId);
-      const target = board.todos.find((todo) => todo.id === row.dataset.todo);
-      if (!source || !target || source.id === target.id || source.groupId !== target.groupId) return;
-      const after = event.clientY > row.getBoundingClientRect().top + row.offsetHeight / 2;
-      void change(() => {
-        board.todos.splice(board.todos.indexOf(source), 1);
-        board.todos.splice(board.todos.indexOf(target) + (after ? 1 : 0), 0, source);
-      });
+      const source = draggedId;
+      const place = dropPlace(row, event);
+      draggedId = null;
+      if (!source) return;
+      void change(() => { moveTodo(board, source, row.dataset.todo!, place); });
     });
   });
 }
-
-document.addEventListener("keydown", (event) => {
-  if (event.isComposing || suspending || !initialized) return;
-  if (event.key === "Escape") { composer = null; render(); }
-});
 
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
 
@@ -572,9 +493,13 @@ async function start() {
   const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
   const session = isTauri() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
-  if (!workspace.lists.length || !workspace.lists.some((list) => list.id === workspace.activeListId)) throw new Error("Invalid workspace");
-  for (const list of workspace.lists) reconcile(list.board);
-  board = workspace.lists.find((list) => list.id === workspace.activeListId)!.board;
+  if (!workspace.lists.length) throw new Error("Invalid workspace");
+  for (const list of workspace.lists) normalize(list.board);
+  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(t("myTodos")));
+  if (!workspace.lists.some((list) => list.id === workspace.activeListId && !list.archived)) {
+    workspace.activeListId = workspace.lists.find((list) => !list.archived)!.id;
+  }
+  board = activeList().board;
   if (isTauri() && !stored) await persist();
   restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);

@@ -52,22 +52,14 @@ struct Todo {
     title: String,
     completed: bool,
     created_at: i64,
-    group_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Group {
-    id: String,
-    title: String,
-    prerequisite_ids: Vec<String>,
+    #[serde(default)]
+    next_id: Option<String>,
     #[serde(default)]
     collapsed: bool,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct Board {
-    groups: Vec<Group>,
     todos: Vec<Todo>,
 }
 
@@ -76,6 +68,8 @@ struct TodoList {
     id: String,
     title: String,
     board: Board,
+    #[serde(default)]
+    archived: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

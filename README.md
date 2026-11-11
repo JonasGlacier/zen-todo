@@ -4,15 +4,15 @@
 
 A lightweight floating todo app for Windows 10 and 11, built with Tauri 2, Rust, TypeScript, HTML and CSS.
 
-<img src="screenshot.png" alt="Zen Todo showing a list of grouped tasks and their dependencies" width="380">
+<img src="screenshot.png" alt="Zen Todo showing tasks and their dependencies" width="380">
 
 *App preview with example tasks.*
 
 ## Features
 
-- Keep multiple independent lists, organize tasks into groups, and reorder tasks within each group.
-- Link groups as steps with multiple prerequisites. Later tasks become available once all preceding groups are complete; undoing a prerequisite also resets dependent tasks.
-- Collapse groups individually or use Tidy up to organize completed, available, and waiting groups.
+- Keep multiple independent lists and archive a whole list instead of deleting it; archived lists can be viewed and restored.
+- Tasks are plain, Notion-style rows. Each task can have several previous steps but only one next step, so dependencies form a tree that converges. Previous steps are indented above the task they lead to; a task can be completed only after all its previous steps are done, and reopening one reopens the tasks after it.
+- Edit in place: Enter adds a task, Tab/Shift+Tab nests or lifts it, and drag the handle to reorder or drop onto another task to make it that task's previous step.
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
 - Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
 - Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
@@ -46,37 +46,20 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 
 ## 当前功能
 
-- 通过标签页创建、切换、重命名和删除多个独立待办列表；删除最后一个列表时自动创建空白列表
-- 点击顶部列表名称可编辑；在列表底部长按“删除列表”1.5 秒删除当前列表
-- 按组添加、完成、删除待办事项，点击待办文字即可编辑
-- 点击待办右侧的扩展按钮，将待办转换为同名分组；新分组继承原分组的上一步和下一步，再添加其中的待办和步骤
-- 新建分组立即创建，默认无名称；组名可以后续填写或清空
-- 每组可独立折叠，并保存展开状态；顶部“一键整理”折叠已完成及等待中的组，展开可做的组
-- 折叠组按需渲染：收起时不创建任务行、输入框和任务事件监听器，展开时再生成
-- 嵌套边框展示步骤：上一步在内侧，下一步在外侧下方
-- 同组任务并行；所有前置组全部完成后，下一组才可完成
-- 支持组之间多对多依赖，共享的上一步显示为可点击定位的引用
-- 撤销前提完成状态时，自动撤销相关后续任务的完成状态
-- 组内拖动排序，删除组时只删除本组及相关依赖，不删除后续组
-- 任务保存到用户数据目录，不依赖数据库
-- 无边框小窗口，支持拖动和始终置顶
-- 顶部整条 24px 高区域及标题栏非交互区域均可拖动窗口
-- 顶部齿轮打开独立设置窗口，可切换简体中文 / English，主窗口、设置窗口和托盘菜单同步更新
+- 通过标签页创建、切换、重命名多个独立待办列表；点击顶部列表名称可编辑
+- 不再删除列表，而是“归档清单”：整张清单移入“已归档”，可在标签栏的归档按钮中查看并恢复；归档最后一个活跃列表时自动创建空白列表
+- 待办是类似 Notion 的独立行，不再有分组；点击文字即可编辑，已完成的待办会一直保留
+- 每个待办可以有多个“上一步”，但只有一个“下一步”，整体是逐渐收敛的树；上一步缩进显示在下一步上方
+- 所有上一步完成后，待办才能完成；撤销某个上一步时，自动撤销其后续待办的完成状态
+- 键盘：回车添加同级待办；Tab 设为下一行待办的上一步，Shift+Tab 上移一级；空的新待办按 Backspace 删除；上下方向键在待办间移动
+- 拖动左侧手柄：落在目标上/下边缘为调整顺序（并改为同一个下一步），落在中间则成为目标的上一步；不能形成循环
+- 悬停显示“添加上一步”和删除；删除待办时，其上一步改为连接到它的下一步
+- 待办左侧箭头折叠或展开上一步；顶部“收起已完成”折叠所有已完成的待办的上一步
+- 任务保存到用户数据目录，不依赖数据库；旧数据不做迁移兼容
+- 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
+- 顶部齿轮打开独立设置窗口，可切换简体中文 / English
 - 桌面版可在设置中启用独立密码加密，并选择隐藏到托盘时是否锁定
-- 界面使用 Lucide SVG 图标，通过 npm 安装并按需打包，无需在线加载图标
-- 默认启用低内存托盘模式：收起时保存状态并销毁主窗口及设置窗口，只保留原生托盘进程
-- 左键点击托盘图标恢复窗口
-- 托盘菜单支持显示窗口和退出应用
-
-## 分组与步骤
-
-1. 点击列表底部的“新建分组”立即创建无名组，再输入待办；可连续按回车添加。组名可稍后点击标题空白处填写。
-2. 每组右侧常驻四个图标：添加待办、添加上一步、添加下一步、删除本组；悬停可查看说明。
-3. 添加上一步或下一步时，点击“新建分组”直接创建无名步骤，或点击已有组建立关联。每个组可以有多个上一步和下一步，循环依赖不可添加。
-4. 等待中的组完整显示、任务置灰，完成按钮不可用。空的前置组不会解锁下一步，需要添加并完成待办，或解除关联。
-5. 在添加步骤面板中点击已关联上一步右侧的 `×` 可以解除关联。清除已完成会移除完整完成的组及其关联，部分完成的组仅移除已完成待办。
-6. 点击待办文字直接编辑，按回车或移开焦点保存，Esc 取消。空白内容不覆盖原待办；等待中和已完成的待办也可编辑。
-7. 点击组标题左侧的箭头折叠或展开本组待办；前置组独立显示，不会被外层组一起隐藏。点击顶部“一键整理”图标，根据当前完成和依赖状态重新整理所有组；整理后仍可手动展开或折叠。新建分组、添加待办和定位共享组时会展开对应组。
+- 界面使用 Lucide SVG 图标，默认启用低内存托盘模式：收起时保存状态并销毁窗口，只保留托盘进程
 
 在普通浏览器中运行时，数据保存在该浏览器的 localStorage；桌面应用使用本地文件。
 
@@ -105,8 +88,6 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 此模式默认开启，不提供开关。点击隐藏按钮或关闭主窗口时，应用会等待当前保存完成，再保存待办和界面快照，销毁主窗口及设置窗口的 WebView。没有窗口时，Rust 进程和系统托盘仍然运行；托盘菜单的“退出”才会结束应用。
 
 点击托盘图标或“显示窗口”时，应用按原窗口配置重新创建主窗口，恢复当前列表、折叠状态、置顶状态、窗口位置和大小、滚动位置及待办输入草稿。设置窗口不自动重建。界面快照保留在托盘进程内存中；已保存待办仍写入 `todos.json`。保存失败时不会销毁主窗口，可继续编辑并重试。
-
-折叠只保留分组标题、进度和操作按钮，不创建本组任务的 DOM 和监听器；嵌套的前置组仍独立渲染，不会因外层等待组折叠而隐藏可做的步骤。
 
 ## 开发环境
 

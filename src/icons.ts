@@ -1,14 +1,12 @@
 import {
-  ArrowDownToLine, ArrowUpRight, ArrowUpToLine, Check, ChevronRight,
-  FolderPlus, GripVertical, Languages, ListFilter, ListPlus, ListTodo, Minus,
-  Pin, PinOff, Plus, Settings, ShieldCheck, SlidersHorizontal, Trash2, X, createElement,
+  Archive, ArchiveRestore, ArrowUpToLine, Check, ChevronRight, GripVertical, Languages,
+  ListFilter, ListTodo, Minus, Pin, PinOff, Plus, Settings, ShieldCheck, SlidersHorizontal, X, createElement,
 } from "lucide";
 
 const icons = {
-  task: ListPlus, previous: ArrowUpToLine, next: ArrowDownToLine,
-  delete: Trash2, chevron: ChevronRight, organize: ListFilter, settings: Settings,
+  previous: ArrowUpToLine, chevron: ChevronRight, organize: ListFilter, settings: Settings,
   pin: Pin, pinOff: PinOff, hide: Minus, plus: Plus, close: X, check: Check,
-  grip: GripVertical, jump: ArrowUpRight, empty: ListTodo, expandTask: FolderPlus,
+  grip: GripVertical, empty: ListTodo, archive: Archive, restore: ArchiveRestore,
   general: SlidersHorizontal, language: Languages, privacy: ShieldCheck,
 };
 const cache = new Map<keyof typeof icons, string>();
