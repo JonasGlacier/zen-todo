@@ -1,4 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <rect width="256" height="256" rx="64" fill="#70836a"/>
-  <path d="M65 133l39 39 87-92" fill="none" stroke="#fffefa" stroke-linecap="round" stroke-linejoin="round" stroke-width="25"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 768 768">
+  <title>app-icon</title>
+  <rect width="768" height="768" fill="#F5A9C6"/>
+  <g fill="#FFFFFF" stroke="#000000" stroke-width="20" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M226 574 C182 539 166 497 168 447 L173 348 C174 296 155 270 129 239 C105 211 99 184 113 158 C131 125 168 116 198 129 C235 145 250 182 258 226 C265 270 269 304 300 316 C331 330 367 314 405 280 L579 101 C605 73 628 65 650 82 C677 102 677 131 651 161 L500 331 C531 319 557 328 578 348 C607 377 603 410 579 429 C609 447 620 483 607 510 C591 545 551 563 508 560 C493 601 463 630 401 644 C408 663 417 680 406 691 C390 711 356 708 326 704 C288 699 247 687 218 669 C190 651 193 628 208 604 Z"/>
+    <path d="M500 331 C466 344 420 368 394 397 C375 417 377 441 395 455 C418 474 456 466 490 455 C529 443 562 434 579 429"/>
+    <path d="M410 467 C393 481 398 512 419 532 C442 555 480 563 508 560" fill="none"/>
+    <g fill="none" stroke-width="10">
+      <path d="M289 360 C319 368 338 390 347 418"/>
+      <path d="M332 493 C330 528 349 560 384 578"/>
+      <path d="M226 574 Q252 594 276 601"/>
+      <path d="M401 644 Q389 647 380 644"/>
+    </g>
+  </g>
 </svg>
