@@ -68,18 +68,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .delete-list-button.is-holding { color: #ab6559; background: linear-gradient(to right, #eed8ce 100%, #f5ebe6 100%) left / 0% 100% no-repeat #f5ebe6; animation: hold-delete 1.5s linear forwards; }
 @keyframes hold-delete { to { background-size: 100% 100%; } }
 .tab-action.is-active { background: #e8ecdf; color: #526848; }
-.archive-heading { padding: 4px 2px 8px; font-size: 11px; font-weight: 600; color: #68755f; }
-.archived-list { border-bottom: 1px solid #dce1d2; }
-.archived-header { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 2px; }
-.archived-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.archived-meta { flex-shrink: 0; color: #989e90; font-size: 10px; }
-.restore-button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 3px 6px; border-radius: 3px; color: #60734e; font-size: 10px; }
+.archive-heading { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; font-size: 11px; }
+.archive-heading strong { font-weight: 600; color: #68755f; }
+.back-button { display: grid; width: 22px; height: 22px; place-items: center; border-radius: 3px; color: #889579; }
+.back-button:hover { background: #e8ecdf; color: #526848; }
+.back-button .lucide { width: 14px; height: 14px; }
+.archive-hint { margin: 0 0 8px; color: #a2aa96; font-size: 10px; line-height: 1.5; }
+.archived-list { margin-bottom: 8px; padding: 6px 8px; border: 1px solid #dce1d2; border-radius: 4px; background: #fffef9; }
+.archived-header { display: flex; align-items: center; gap: 4px; }
+.archived-info { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+.archived-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }
+.archived-meta { color: #989e90; font-size: 10px; }
+.restore-button { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; padding: 4px 7px; border-radius: 3px; color: #60734e; font-size: 10px; }
 .restore-button:hover { background: #e0e7d6; }
 .restore-button .lucide { width: 12px; height: 12px; }
-.archived-tasks { margin: 0; padding: 2px 4px 8px 26px; font-size: 12px; line-height: 1.6; }
-.archived-tasks .is-completed { color: #9da28f; text-decoration: line-through; }
+.archived-tasks { max-height: 84px; margin: 6px 0 0; padding: 4px 0 0 16px; overflow: auto; border-top: 1px solid #eef0e6; color: #7b8672; font-size: 11px; line-height: 1.6; scrollbar-width: thin; }
+.archived-tasks .is-completed { color: #a9ae9d; text-decoration: line-through; }
+.delete-list-button.icon-hold { display: grid; width: 24px; height: 24px; flex-shrink: 0; padding: 0; place-items: center; }
+.delete-list-button.icon-hold .lucide { width: 13px; height: 13px; }
 .muted { color: #a2aa96; }
-.archive-empty { padding: 20px 2px; font-size: 11px; text-align: center; }
 input::placeholder { color: #a1a894; }
 .footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; min-height: 22px; margin-top: 5px; color: #969d89; font-size: 10px; }
 .footer button { color: #808d72; font-size: 10px; padding: 3px 0; }

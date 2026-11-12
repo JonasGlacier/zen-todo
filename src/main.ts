@@ -97,13 +97,22 @@ function nodeTemplate(todo: Todo): string {
 
 function archiveTemplate(): string {
   const archived = workspace.lists.filter((list) => list.archived);
+  const items = archived.map((list) => {
+    const done = list.board.todos.filter((todo) => todo.completed).length;
+    const name = escapeHtml(list.title);
+    const tasks = list.board.todos.length
+      ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("")
+      : `<li class="muted">${t("emptyArchivedList")}</li>`;
+    return `<section class="archived-list">
+      <div class="archived-header"><div class="archived-info"><span class="archived-name" title="${name}">${name}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span></div>
+        <button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button>
+        <button class="delete-list-button icon-hold" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}" aria-label="${escapeHtml(t("holdDeleteNamedList", { title: list.title }))}">${icon("trash")}</button></div>
+      <ul class="archived-tasks">${tasks}</ul>
+    </section>`;
+  }).join("");
   return `<div class="list archive-panel" id="todo-list">
-    <div class="archive-heading">${t("archivedLists")}</div>
-    ${archived.length ? archived.map((list) => {
-      const done = list.board.todos.filter((todo) => todo.completed).length;
-      return `<section class="archived-list"><div class="archived-header"><span class="archived-name">${escapeHtml(list.title)}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span><button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button></div>
-        <ul class="archived-tasks">${list.board.todos.length ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("") : `<li class="muted">${t("emptyArchivedList")}</li>`}</ul><button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}" aria-label="${escapeHtml(t("holdDeleteNamedList", { title: list.title }))}">${t("holdDeleteList")}</button></section>`;
-    }).join("") : `<p class="muted archive-empty">${t("archivedEmpty")}</p>`}
+    <div class="archive-heading"><button class="back-button" id="archive-back" title="${t("backToList")}" aria-label="${t("backToList")}">${icon("back")}</button><strong>${t("archivedLists")}</strong><span class="archived-meta">${archived.length}</span></div>
+    ${archived.length ? `<p class="archive-hint">${t("archivedHint")}</p>${items}` : `<div class="empty"><span>${icon("archive")}</span><strong>${t("archivedEmpty")}</strong></div>`}
   </div>`;
 }
 
@@ -335,6 +344,7 @@ function bindEvents() {
       draggedId = null;
     });
   });
+  document.querySelector("#archive-back")?.addEventListener("click", () => { void change(() => { showArchive = false; }); });
   document.querySelector("#archive-toggle")!.addEventListener("click", () => {
     void change(() => { showArchive = !showArchive; draggedId = null; });
   });
