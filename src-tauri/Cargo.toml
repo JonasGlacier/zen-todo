@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A lightweight floating todo list for Windows"
 authors = ["Zen Todo"]
 edition = "2021"
+default-run = "zen-todo"
 
 [lib]
 name = "zen_todo_lib"
@@ -22,3 +23,13 @@ rand = "0.8"
 hex = "0.4"
 tempfile = "3"
 zeroize = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+dirs = "6"
+keyring = { version = "3", features = ["windows-native"] }
+fs2 = "0.4"
+
+[[bin]]
+name = "zen-todo-cli"
+path = "src/bin/zen-todo-cli.rs"

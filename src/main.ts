@@ -9,6 +9,7 @@ import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
 import { captureEditors, restoreEditors } from "./session";
 import type { UiSession } from "./session";
+import type { AgentResult, AiProposal } from "./ai";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -25,6 +26,13 @@ let openingSettings = false;
 let suspending = false;
 let initialized = false;
 let saveFailures = 0;
+let aiOpen = false;
+let aiPrompt = "";
+let aiBusy = false;
+let aiGeneration = 0;
+let canUndo = false;
+let remoteCount = 0;
+let remoteVersion = 0;
 
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
@@ -53,6 +61,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
         current.id === todo.id && !current.completed && isBlocked(board, current))).length;
       if (reset) message = t("resetTasks", { count: reset });
       await persist();
+      if (JSON.stringify(previous) !== JSON.stringify(workspace)) canUndo = false;
     } catch (error) {
       saveFailures++;
       workspace = previous;
@@ -133,9 +142,11 @@ function render() {
   const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
   const content = showArchive ? archiveTemplate() : `<article class="note" data-color="${color}">
       <header class="note-header" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${status}</span></div>
+        <button class="icon-button ${aiOpen ? "is-active" : ""}" id="ai-button" title="${t("aiOpen")}" aria-label="${t("aiOpen")}" aria-expanded="${aiOpen}" aria-controls="ai-panel">${icon("ai")}</button>
         <div class="color-picker"><button class="icon-button" id="color-button" title="${t("noteColorNamed", { color: colorName(color) })}" aria-label="${t("noteColorNamed", { color: colorName(color) })}" aria-haspopup="true" aria-expanded="false" aria-controls="palette">${icon("palette")}</button>
           <div class="palette" id="palette" role="group" aria-label="${t("noteColor")}" hidden>${swatches}</div></div>
       </header>
+      ${aiOpen ? `<form class="ai-panel" id="ai-panel"><label class="sr-only" for="ai-prompt">${t("ai")}</label><textarea id="ai-prompt" rows="2" maxlength="2000" placeholder="${t("aiPlaceholder")}" ${aiBusy ? "readonly" : ""}>${escapeHtml(aiPrompt)}</textarea><div class="ai-controls"><span>${aiBusy ? t("aiThinking") : t("aiSettingsHint")}</span><button type="${aiBusy ? "button" : "submit"}" id="ai-run">${t(aiBusy ? "cancel" : "aiRun")}</button></div></form>` : ""}
       <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
         <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
         <div class="list-actions"><button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
@@ -155,11 +166,96 @@ function render() {
     </div>
     </div>
     <footer class="footer"><span>${t("footer", { count: pending.length })}</span><span>${t("stayFocused")}</span></footer>
-    <div class="notice ${message ? "visible" : ""}" role="status">${escapeHtml(message)}</div>
+    <div class="notice ${message || canUndo ? "visible" : ""}" role="status"><span>${escapeHtml(message)}</span>${canUndo ? `<button id="agent-undo">${icon("undo")} ${t("undo")}</button>` : ""}</div>
   </section>`;
   bindEvents();
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
   document.querySelector(".list")!.scrollTop = listScroll;
+}
+
+function renderKeepingEditors() {
+  const editors = captureEditors();
+  render();
+  restoreEditors(editors, resizeTodo);
+}
+
+function blurEditor() {
+  if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) document.activeElement.blur();
+}
+
+// Remote writes use the manual save queue. Rust owns the shared action engine
+// and undo record, including when no WebView exists in tray mode.
+function remoteOperation(command: string, args: Record<string, unknown>, success: string): Promise<boolean> {
+  const failures = saveFailures;
+  blurEditor();
+  remoteCount++;
+  app.inert = true;
+  let succeeded = false;
+  const operation = pendingChange.then(async () => {
+    try {
+      if (command === "execute_cli_request") args.reject = suspending || failures !== saveFailures;
+      else if (suspending || failures !== saveFailures) throw new Error(t("saveFailed"));
+      const result = await invoke<AgentResult>(command, args);
+      workspace = result.workspace;
+      board = activeList().board;
+      canUndo = result.canUndo;
+      if (result.command !== "list") showArchive = false;
+      if (result.command !== "list") remoteVersion++;
+      draggedId = null;
+      if (result.command !== "list") message = result.command === "undo" ? t("aiUndone") : success;
+      succeeded = true;
+    } catch (error) {
+      message = String(error).includes("Conflict:") ? t("aiConflict") : t("aiFailed", { error: String(error) });
+    }
+    remoteCount--;
+    if (!suspending) {
+      app.inert = remoteCount > 0;
+      if (succeeded) render(); else renderKeepingEditors();
+    }
+  });
+  pendingChange = operation.catch(console.error);
+  return operation.then(() => succeeded);
+}
+
+function toggleAi() {
+  blurEditor();
+  const operation = pendingChange.then(() => {
+    aiOpen = !aiOpen;
+    showArchive = false;
+    render();
+    if (aiOpen) document.querySelector<HTMLTextAreaElement>("#ai-prompt")?.focus();
+  });
+  pendingChange = operation.catch(console.error);
+}
+
+function cancelAi() {
+  aiGeneration++;
+  aiBusy = false;
+  message = t("aiCancelled");
+  renderKeepingEditors();
+}
+
+async function runAi() {
+  if (aiBusy || !aiPrompt.trim()) return;
+  if (!isTauri()) { message = t("aiDesktopOnly"); renderKeepingEditors(); return; }
+  const failures = saveFailures;
+  blurEditor();
+  aiBusy = true;
+  const generation = ++aiGeneration;
+  const prompt = aiPrompt;
+  renderKeepingEditors();
+  try {
+    await pendingChange;
+    if (failures !== saveFailures) throw new Error(t("saveFailed"));
+    const proposal = await invoke<AiProposal>("run_ai_prompt", { prompt });
+    if (generation !== aiGeneration || suspending) return;
+    const applied = await remoteOperation("agent_execute", { request: { command: "apply", ...proposal } }, t("aiUpdated"));
+    if (applied) { aiOpen = false; aiPrompt = ""; }
+  } catch (error) {
+    if (generation === aiGeneration) message = t("aiFailed", { error: String(error) });
+  } finally {
+    if (generation === aiGeneration && !suspending) { aiBusy = false; renderKeepingEditors(); }
+  }
 }
 
 function resizeTodo(input: HTMLTextAreaElement) {
@@ -214,7 +310,10 @@ function restoreSessionEditors(session: UiSession | null) {
 async function suspendToTray() {
   if (!isTauri() || suspending) return;
   suspending = true;
+  aiGeneration++;
+  aiBusy = false;
   const failures = saveFailures;
+  const capturedVersion = remoteVersion;
   const session: UiSession | null = initialized ? {
     version: 1, listId: document.querySelector<HTMLElement>(".tab.is-selected")?.dataset.list ?? workspace.activeListId, pinned,
     scrollTop: document.querySelector(".list")?.scrollTop ?? 0,
@@ -227,6 +326,7 @@ async function suspendToTray() {
   try {
     await pendingChange;
     if (saveFailures !== failures) throw new Error("Pending save failed");
+    if (session && capturedVersion !== remoteVersion) { session.editors = []; session.listId = workspace.activeListId; }
     if (session) session.pinned = pinned;
     if (initialized) await persist();
     await invoke("hide_window", { session });
@@ -363,6 +463,17 @@ document.addEventListener("pointerdown", (event) => {
 });
 
 function bindEvents() {
+  document.querySelector("#ai-button")?.addEventListener("click", toggleAi);
+  document.querySelector<HTMLTextAreaElement>("#ai-prompt")?.addEventListener("input", (event) => { aiPrompt = (event.target as HTMLTextAreaElement).value; });
+  document.querySelector("#ai-panel")?.addEventListener("submit", (event) => { event.preventDefault(); void runAi(); });
+  document.querySelector("#ai-run")?.addEventListener("click", () => { if (aiBusy) cancelAi(); });
+  document.querySelector("#ai-prompt")?.addEventListener("keydown", (event) => {
+    const key = event as KeyboardEvent;
+    if (key.isComposing) return;
+    if (key.key === "Enter" && !key.shiftKey) { key.preventDefault(); void runAi(); }
+    if (key.key === "Escape") { key.stopPropagation(); if (aiBusy) cancelAi(); else toggleAi(); }
+  });
+  document.querySelector("#agent-undo")?.addEventListener("click", () => { void remoteOperation("agent_execute", { request: { command: "undo" } }, t("aiUndone")); });
   document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -531,6 +642,12 @@ function bindEvents() {
 }
 
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
+document.addEventListener("keydown", (event) => {
+  if (initialized && !suspending && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    toggleAi();
+  }
+});
 
 async function unlockIfNeeded() {
   const status = await invoke<{ locked: boolean }>("vault_status");
@@ -572,6 +689,15 @@ async function start() {
   }
   board = activeList().board;
   if (!stored || recolored) await persist().catch(console.error);
+  if (isTauri()) {
+    const state = await invoke<AgentResult>("agent_execute", { request: { command: "list" } });
+    canUndo = state.canUndo;
+    if (canUndo) message = t("aiUpdated");
+    const stopCliListener = await listen<string>("cli-request", ({ payload }) => {
+      void remoteOperation("execute_cli_request", { id: payload, reject: false }, t("aiUpdated"));
+    });
+    window.addEventListener("pagehide", stopCliListener, { once: true });
+  }
   restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);
   window.addEventListener("pagehide", dispose, { once: true });

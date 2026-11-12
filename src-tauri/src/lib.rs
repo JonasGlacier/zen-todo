@@ -3,6 +3,9 @@ use std::{collections::HashSet, fs, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEvent, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 
 mod vault;
+mod agent;
+mod ai;
+pub mod cli;
 
 #[derive(Default)]
 struct VaultState { key: Option<vault::Key>, sealed_session: Option<Vec<u8>> }
@@ -13,7 +16,7 @@ struct VaultRuntime(Mutex<VaultState>);
 struct VaultStatus { encrypted: bool, locked: bool, lock_on_hide: bool, legacy_temp: bool }
 
 #[derive(Clone, Copy, PartialEq)]
-enum UiPhase { Visible, Suspending, Hidden, Restoring }
+enum UiPhase { Visible, Suspending, Hidden, Restoring, AgentEditing }
 
 struct UiState {
     phase: UiPhase,
@@ -45,7 +48,7 @@ fn with_ui<R: Runtime, T>(app: &AppHandle<R>, update: impl FnOnce(&mut UiState) 
     Ok(update(&mut ui))
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Todo {
     id: String,
@@ -56,12 +59,12 @@ struct Todo {
     next_id: Option<String>,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 struct Board {
     todos: Vec<Todo>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct TodoList {
     id: String,
     title: String,
@@ -72,7 +75,7 @@ struct TodoList {
     color: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Workspace {
     lists: Vec<TodoList>,
@@ -230,6 +233,7 @@ async fn hide_window<R: Runtime>(app: AppHandle<R>, session: Option<serde_json::
                 let sealed = session.as_ref().map(|s| serde_json::to_vec(s).map_err(|e| e.to_string()).and_then(|v| vault::seal(key, &v))).transpose()?;
                 with_ui(&app, |ui| ui.session = None)?;
                 vault.sealed_session = sealed;
+                *app.state::<agent::AgentRuntime>().0.lock().map_err(|e| e.to_string())? = None;
                 locked_key = vault.key.take();
             }
             Ok(())
@@ -279,7 +283,7 @@ fn start_dragging(window: WebviewWindow) -> Result<(), String> {
 
 async fn restore_main<R: Runtime>(app: AppHandle<R>) -> Result<(), String> {
     let action = with_ui(&app, |ui| match ui.phase {
-        UiPhase::Suspending => { ui.show_requested = true; 0 }
+        UiPhase::Suspending | UiPhase::AgentEditing => { ui.show_requested = true; 0 }
         UiPhase::Restoring => 0,
         UiPhase::Visible => 1,
         UiPhase::Hidden => { ui.phase = UiPhase::Restoring; ui.ready = false; 2 }
@@ -403,7 +407,10 @@ pub fn run() {
     tauri::Builder::default()
         .manage(UiRuntime::default())
         .manage(VaultRuntime::default())
+        .manage(agent::AgentRuntime::default())
+        .manage(cli::CliRuntime::default())
         .setup(|app| {
+            cli::start(app.handle().clone())?;
             let menu = tray_menu(app.handle(), "zh-CN").map_err(std::io::Error::other)?;
             let tray_icon = tauri::image::Image::from_app_icon_resource(32)?;
             tauri::tray::TrayIconBuilder::with_id("main-tray")
@@ -451,7 +458,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, change_encryption_password, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, change_encryption_password, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings, agent::agent_execute, cli::execute_cli_request, ai::get_ai_settings, ai::save_ai_settings, ai::run_ai_prompt, ai::test_ai_connection])
         .build(tauri::generate_context!())
         .expect("error while building Zen Todo")
         .run(|_, event| {

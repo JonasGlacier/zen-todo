@@ -16,6 +16,8 @@ A lightweight floating todo app for Windows 10 and 11, built with Tauri 2, Rust,
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
 - Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
 - Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
+- Use the ✨ button or Ctrl+K to create/edit lists with AI, with one-step undo. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
+- External Agents can use the bundled `zen-todo-cli.exe` to read lists, submit changes, and undo, including while the app is hidden in the tray. See [AI and CLI usage](docs/ai-and-cli.md).
 
 ## Privacy and storage
 
@@ -32,11 +34,15 @@ npm install
 npm run dev          # browser development preview
 npm test             # task-dependency tests
 npm run build        # frontend build
+cargo test --manifest-path src-tauri/Cargo.toml # Rust action, AI HTTP and encryption tests
+cargo build --manifest-path src-tauri/Cargo.toml --bin zen-todo-cli # development CLI
 npm run tauri dev    # desktop development
 npm run tauri build  # Windows installer
 ```
 
 The repository also includes a GitHub Actions workflow to build the Windows installer; download the `zen-todo-windows-installer` artifact from the workflow run.
+
+The Windows installer builds and installs the console CLI next to the GUI executable. Invoke it by full path or add the install directory to your PATH. No model subscription is included: preset availability, quotas and prices depend on the provider. Ollama runs locally using your own hardware. API keys are kept in Windows Credential Manager; only endpoint and model preferences are written to `ai-settings.json`. AI requests send the active list and prompt to the selected endpoint, even if local file encryption is enabled.
 
 ---
 
@@ -59,6 +65,9 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 - 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
 - 顶部齿轮打开独立设置窗口，可切换简体中文 / English
 - 桌面版可在设置中启用独立密码加密，并选择隐藏到托盘时是否锁定
+- 点击便签头部 ✨ 或按 Ctrl+K，用自然语言创建和编辑清单；结果直接应用，并支持撤销最近一次 AI / Agent 更新
+- 设置 → AI 支持自定义 OpenAI 兼容接口、Ollama 本地模型及可编辑的服务商预设；支持保存配置和测试已保存的连接
+- 外部 Agent 可通过安装目录中的 `zen-todo-cli.exe` 读取、修改与撤销；隐藏到托盘后仍可操作，保险库锁定时拒绝读取和修改。详见 [AI 与 CLI 使用说明](docs/ai-and-cli.md)
 - 界面使用 Lucide SVG 图标，默认启用低内存托盘模式：收起时保存状态并销毁窗口，只保留托盘进程
 
 在普通浏览器中运行时，数据保存在该浏览器的 localStorage；桌面应用使用本地文件。
@@ -70,6 +79,14 @@ The repository also includes a GitHub Actions workflow to build the Windows inst
 在“通用 → 语言”中选择简体中文或 English，设置即时保存。语言偏好单独保存在 WebView / 浏览器的 `zen-todo-settings` 中，下次打开自动恢复。跨窗口通过 storage 事件与 Tauri 事件同步，切换语言不会修改已有列表名称、组名和待办内容，也不会丢失主窗口中正在编辑的草稿。
 
 普通浏览器开发模式下，设置会打开到独立的命名弹出窗口；也可以直接访问 `/?view=settings` 预览设置页面。
+
+### AI 配置
+
+在“AI”分类选择服务预设，填写 Base URL、模型名称和 API Key，然后保存。Ollama 需先在本机安装并下载对应模型，例如 `ollama pull qwen2.5:7b`，通常无需 API Key。服务商预设只是可编辑示例，不保证模型持续可用或免费；请以服务商的实际额度和定价为准。
+
+API Key 存在 Windows 凭据管理器中，不写入待办或普通配置文件；留空会保留已有密钥，切换预设时默认清除旧密钥，输入新密钥会取消清除。Base URL 和模型名称保存在数据目录的 `ai-settings.json`。测试连接仅发送一条简短测试消息，使用已保存配置，不发送待办。实际执行 AI 指令时，会将当前清单与指令发送到所选接口，即使开启了本地文件加密。
+
+AI 生成期间仍可手动编辑；若数据已变化，旧生成结果会被拒绝应用。取消生成会丢弃本次结果，已发出的网络请求可能仍在服务端完成。撤销仅保留最近一次 AI / Agent 更新，后续手动修改后不能覆盖还原；退出或锁定保险库会清除该撤销快照。
 
 ### 本地加密
 

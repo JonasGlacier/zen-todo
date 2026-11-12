@@ -8,6 +8,8 @@ export type Settings = { language: Language; uiScale: UiScale };
 export const isUiScale = (value: unknown): value is UiScale => UI_SCALES.includes(value as UiScale);
 
 const zh = {
+  aiTest: "测试已保存的连接", aiTestOk: "连接成功", aiTestFailed: "连接失败：{error}",
+  ai: "AI", aiOpen: "AI 指令（Ctrl+K）", aiPlaceholder: "创建一份旅行清单，或调整当前任务…", aiRun: "执行", aiThinking: "正在生成…", aiUpdated: "AI / Agent 已更新清单", undo: "撤销", aiUndone: "已撤销更新", aiFailed: "AI / Agent 操作失败：{error}", aiDesktopOnly: "AI 与 CLI 功能请在桌面应用中使用。", aiDescription: "用自然语言创建和编辑清单，也可让外部 Agent 通过 CLI 操作。", aiPreset: "服务预设", aiCustom: "自定义兼容接口", aiBaseUrl: "API Base URL", aiModel: "模型名称", aiApiKey: "API Key", aiKeyHint: "留空保留已存密钥；密钥保存在 Windows 凭据管理器。", aiClearKey: "清除已存 API Key（本地模型可勾选）", aiPrivacyHint: "执行时会将当前清单和指令发送到所选接口。本地加密不影响发送内容；Ollama 可在本机运行。服务可用性、价格与免费额度以服务商为准。", aiSave: "保存配置", aiSaved: "AI 配置已保存", aiSaveFailed: "无法保存 AI 配置：{error}", aiLoadFailed: "无法读取 AI 配置：{error}", aiCliHint: "外部 Agent：运行 zen-todo-cli schema 查看协议；list 读取数据；apply 提交变更；undo 撤销。应用需保持运行，锁定时拒绝访问。", aiConflict: "清单已变化，本次结果未应用，请重新执行。", aiCancelled: "已取消应用本次生成结果", aiSettingsHint: "首次使用请先在设置 → AI 中配置接口与模型。",
   newList: "新列表", myTodos: "我的待办",
   resetTasks: "已撤销 {count} 项后续待办的完成状态", saveFailed: "保存失败，请重试。",
   reorder: "拖动调整顺序", undoComplete: "撤销完成", complete: "完成", prerequisitesFirst: "请先完成所有上一步",
@@ -35,6 +37,8 @@ const zh = {
 };
 
 const en: Record<keyof typeof zh, string> = {
+  aiTest: "Test saved connection", aiTestOk: "Connection successful", aiTestFailed: "Connection failed: {error}",
+  ai: "AI", aiOpen: "AI command (Ctrl+K)", aiPlaceholder: "Create a travel list, or edit these tasks…", aiRun: "Run", aiThinking: "Generating…", aiUpdated: "AI / Agent updated the list", undo: "Undo", aiUndone: "Update undone", aiFailed: "AI / Agent failed: {error}", aiDesktopOnly: "AI and CLI are available in the desktop app.", aiDescription: "Create and edit lists with natural language, or connect an external Agent via CLI.", aiPreset: "Service preset", aiCustom: "Custom compatible API", aiBaseUrl: "API Base URL", aiModel: "Model", aiApiKey: "API Key", aiKeyHint: "Leave blank to keep the saved key. Keys are stored in Windows Credential Manager.", aiClearKey: "Remove saved API key (useful for local models)", aiPrivacyHint: "Commands send the current list and prompt to the selected endpoint, even with local encryption enabled. Ollama can run locally. Availability, pricing and free quotas depend on the provider.", aiSave: "Save configuration", aiSaved: "AI configuration saved", aiSaveFailed: "Couldn't save AI configuration: {error}", aiLoadFailed: "Couldn't load AI configuration: {error}", aiCliHint: "External Agents: zen-todo-cli schema explains the protocol; list reads data; apply submits changes; undo reverts them. Keep the app running. Locked vaults reject access.", aiConflict: "The list changed. This result was not applied; please run again.", aiCancelled: "Cancelled applying this generation", aiSettingsHint: "First configure your endpoint and model in Settings → AI.",
   newList: "New list", myTodos: "My todos",
   resetTasks: "Downstream tasks marked incomplete: {count}", saveFailed: "Couldn't save. Please try again.",
   reorder: "Drag to reorder", undoComplete: "Mark incomplete", complete: "Complete", prerequisitesFirst: "Complete all previous steps first",

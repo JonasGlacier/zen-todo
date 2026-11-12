@@ -2,6 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { UI_SCALES, getLanguage, getUiScale, isUiScale, setLanguage, setUiScale, t, watchSettings } from "./i18n";
 import type { Language } from "./i18n";
 import { icon } from "./icons";
+import { AI_PRESETS } from "./ai";
+import type { AiSettings } from "./ai";
 import "./styles.css";
 import "./settings.css";
 
@@ -14,8 +16,26 @@ let vaultError = "";
 let vaultLoadFailed = false;
 let changingPassword = false;
 let passwordChanged = false;
-let category: "general" | "privacy" = "general";
+let category: "general" | "privacy" | "ai" = "general";
+let aiSettings: AiSettings = { ...AI_PRESETS.ollama, apiKey: "" };
+let aiPreset: keyof typeof AI_PRESETS = "ollama";
+let aiClearKey = false;
+let aiLoaded = !isTauri();
+let aiStatus = "";
+let aiError = false;
+const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 document.body.classList.add("settings-window");
+
+function aiPage(): string {
+  return `<section class="settings-section"><h2>${t("ai")}</h2><p class="section-description">${t("aiDescription")}</p>${isTauri() ? `<form id="ai-settings-form" class="settings-card ai-settings-form"><fieldset ${saving || !aiLoaded ? "disabled" : ""}>
+    <label>${t("aiPreset")}<select id="ai-preset">${Object.keys(AI_PRESETS).map((key) => `<option value="${key}" ${aiPreset === key ? "selected" : ""}>${key === "custom" ? t("aiCustom") : { ollama: "Ollama (local)", bigmodel: "BigModel", siliconflow: "SiliconFlow", openai: "OpenAI" }[key]}</option>`).join("")}</select></label>
+    <label>${t("aiBaseUrl")}<input id="ai-base-url" type="url" value="${escapeHtml(aiSettings.baseUrl)}" required placeholder="https://example.com/v1" /></label>
+    <label>${t("aiModel")}<input id="ai-model" value="${escapeHtml(aiSettings.model)}" required maxlength="200" /></label>
+    <label>${t("aiApiKey")}<input id="ai-api-key" type="password" value="${escapeHtml(aiSettings.apiKey)}" autocomplete="off" /></label><p class="setting-hint">${t("aiKeyHint")}</p>
+    <label class="setting-checkbox"><input id="ai-clear-key" type="checkbox" ${aiClearKey ? "checked" : ""} /><span>${t("aiClearKey")}</span></label>
+    <p class="setting-description">${t("aiPrivacyHint")}</p><div class="password-actions"><button class="settings-action" type="submit">${t("aiSave")}</button><button class="settings-action" type="button" id="ai-test">${t("aiTest")}</button></div>
+    </fieldset><p class="${aiError ? "settings-error" : "settings-success"}" role="status">${escapeHtml(aiStatus)}</p></form>` : `<div class="settings-card"><p class="setting-message setting-description">${t("aiDesktopOnly")}</p></div>`}<p class="setting-description">${t("aiCliHint")}</p></section>`;
+}
 
 function render() {
   const focused = document.activeElement?.id;
@@ -26,12 +46,12 @@ function render() {
     <div class="settings-drag" aria-label="${t("dragWindow")}" title="${t("dragWindow")}"></div>
     <aside class="settings-sidebar">
       <div class="settings-brand">${icon("settings")}<span>Zen Todo</span></div>
-      <nav aria-label="${t("settingsNavigation")}">${(["general", "privacy"] as const).map((item) => `<button class="settings-category ${category === item ? "is-selected" : ""}" data-category="${item}" ${category === item ? 'aria-current="page"' : ""}>${icon(item)}<span>${t(item)}</span></button>`).join("")}</nav>
+      <nav aria-label="${t("settingsNavigation")}">${(["general", "privacy", "ai"] as const).map((item) => `<button class="settings-category ${category === item ? "is-selected" : ""}" data-category="${item}" ${category === item ? 'aria-current="page"' : ""}>${icon(item)}<span>${t(item)}</span></button>`).join("")}</nav>
       <div class="settings-autosave">${icon("check")}<span>${t("savedAutomatically")}</span></div>
     </aside>
     <section class="settings-main">
       <header class="settings-page-header"><div><h1>${t("settings")}</h1><p>${t("settingsDescription")}</p></div><button class="settings-close" id="close-settings" title="${t("closeSettings")}" aria-label="${t("closeSettings")}">${icon("close")}</button></header>
-      ${category === "general" ? `<section class="settings-section" aria-labelledby="general-title"><h2 id="general-title">${t("general")}</h2><p class="section-description">${t("generalDescription")}</p>
+      ${category === "ai" ? aiPage() : category === "general" ? `<section class="settings-section" aria-labelledby="general-title"><h2 id="general-title">${t("general")}</h2><p class="section-description">${t("generalDescription")}</p>
         <div class="settings-card"><div class="setting-row"><div class="setting-label">${icon("language")}<label for="language-select">${t("language")}</label></div><select id="language-select" ${saving ? "disabled" : ""}><option value="zh-CN" lang="zh-CN" ${getLanguage() === "zh-CN" ? "selected" : ""}>简体中文</option><option value="en" lang="en" ${getLanguage() === "en" ? "selected" : ""}>English</option></select></div>
           <p class="setting-description">${t("languageDescription")}</p><p class="setting-hint">${t("languageHint")}</p></div>
         <div class="settings-card scale-card"><div class="setting-row"><div class="setting-label"><label for="scale-select">${t("uiScale")}</label></div><select id="scale-select" ${saving ? "disabled" : ""}>${UI_SCALES.map((scale) => `<option value="${scale}" ${getUiScale() === scale ? "selected" : ""}>${scale}%</option>`).join("")}</select></div><p class="setting-description">${t("uiScaleDescription")}</p></div>
@@ -49,7 +69,7 @@ function render() {
   });
   document.querySelectorAll<HTMLButtonElement>("[data-category]").forEach((button) => button.addEventListener("click", () => {
     if (saving) return;
-    category = button.dataset.category === "privacy" ? "privacy" : "general";
+    category = button.dataset.category === "ai" ? "ai" : button.dataset.category === "privacy" ? "privacy" : "general";
     render();
     document.querySelector<HTMLButtonElement>(`[data-category="${category}"]`)?.focus();
   }));
@@ -58,6 +78,24 @@ function render() {
     if (value === "en" || value === "zh-CN") void changeLanguage(value);
   });
   document.querySelector("#close-settings")!.addEventListener("click", close);
+  document.querySelector<HTMLSelectElement>("#ai-preset")?.addEventListener("change", (event) => {
+    const preset = (event.target as HTMLSelectElement).value as keyof typeof AI_PRESETS;
+    if (!(preset in AI_PRESETS)) return;
+    aiPreset = preset;
+    aiSettings = { ...AI_PRESETS[preset], apiKey: "" };
+    aiClearKey = true;
+    aiStatus = "";
+    render();
+  });
+  for (const [id, field] of [["ai-base-url", "baseUrl"], ["ai-model", "model"], ["ai-api-key", "apiKey"]] as const) {
+    document.querySelector<HTMLInputElement>(`#${id}`)?.addEventListener("input", (event) => {
+      aiSettings[field] = (event.target as HTMLInputElement).value;
+      if (field === "apiKey" && aiSettings.apiKey) { aiClearKey = false; const box = document.querySelector<HTMLInputElement>("#ai-clear-key"); if (box) box.checked = false; }
+    });
+  }
+  document.querySelector<HTMLInputElement>("#ai-clear-key")?.addEventListener("change", (event) => { aiClearKey = (event.target as HTMLInputElement).checked; });
+  document.querySelector("#ai-settings-form")?.addEventListener("submit", (event) => { event.preventDefault(); void saveAi(); });
+  document.querySelector("#ai-test")?.addEventListener("click", () => { void testAi(); });
   document.querySelector<HTMLFormElement>("#encryption-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const password = document.querySelector<HTMLInputElement>("#password")!.value;
@@ -87,6 +125,32 @@ function render() {
   const main = document.querySelector<HTMLElement>(".settings-main");
   if (main) main.scrollTop = scrollTop;
   if (focused) document.getElementById(focused)?.focus();
+}
+
+async function saveAi() {
+  if (saving || !aiLoaded) return;
+  saving = true;
+  aiStatus = "";
+  aiError = false;
+  render();
+  try {
+    await invoke("save_ai_settings", { settings: { ...aiSettings, baseUrl: aiSettings.baseUrl.trim(), model: aiSettings.model.trim() }, clearKey: aiClearKey });
+    aiSettings.apiKey = "";
+    aiClearKey = false;
+    aiStatus = t("aiSaved");
+  } catch (error) { aiError = true; aiStatus = t("aiSaveFailed", { error: String(error) }); }
+  finally { saving = false; render(); }
+}
+
+async function testAi() {
+  if (saving || !aiLoaded) return;
+  saving = true;
+  aiStatus = "";
+  aiError = false;
+  render();
+  try { await invoke("test_ai_connection"); aiStatus = t("aiTestOk"); }
+  catch (error) { aiError = true; aiStatus = t("aiTestFailed", { error: String(error) }); }
+  finally { saving = false; render(); }
 }
 
 async function changePassword(currentPassword: string, newPassword: string) {
@@ -161,4 +225,12 @@ void watchSettings(render).then((dispose) => {
   window.addEventListener("pagehide", dispose, { once: true });
   render();
   if (isTauri()) void invoke<typeof vault>("vault_status").then((status) => { vault = status; render(); }).catch((error) => { console.error(error); vaultLoadFailed = true; render(); });
+  if (isTauri()) void invoke<AiSettings>("get_ai_settings").then((settings) => {
+    if (settings.baseUrl) {
+      aiSettings = settings;
+      aiPreset = (Object.keys(AI_PRESETS) as (keyof typeof AI_PRESETS)[]).find((key) => AI_PRESETS[key].baseUrl === settings.baseUrl && AI_PRESETS[key].model === settings.model) ?? "custom";
+    }
+    aiLoaded = true;
+    render();
+  }).catch((error) => { aiLoaded = true; aiError = true; aiStatus = t("aiLoadFailed", { error: String(error) }); render(); });
 });
