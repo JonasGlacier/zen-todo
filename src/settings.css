@@ -1,4 +1,4 @@
-.settings-window { min-width: 440px; background: var(--surface); }
+.settings-window { background: var(--surface); }
 .settings-layout { position: relative; display: grid; grid-template-columns: 166px minmax(0, 1fr); height: 100%; }
 .settings-drag { position: absolute; z-index: 1; top: 0; left: 0; right: 0; height: 18px; cursor: grab; }
 .settings-sidebar { display: flex; flex-direction: column; gap: 30px; padding: 25px 14px 18px; border-right: 1px solid var(--line); background: #f7f7f7; }
@@ -20,6 +20,7 @@
 .settings-section h2 { margin: 0 0 7px; font-size: 14px; font-weight: 600; }
 .section-description { margin: 0 0 17px; color: var(--text-3); font-size: 11px; line-height: 1.6; }
 .settings-card { padding: 17px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.scale-card { margin-top: 12px; }
 .setting-row { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .setting-label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .setting-label .lucide { color: var(--text-2); }

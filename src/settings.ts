@@ -1,5 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { getLanguage, setLanguage, t, watchSettings } from "./i18n";
+import { UI_SCALES, getLanguage, getUiScale, isUiScale, setLanguage, setUiScale, t, watchSettings } from "./i18n";
 import type { Language } from "./i18n";
 import { icon } from "./icons";
 import "./styles.css";
@@ -8,6 +8,7 @@ import "./settings.css";
 const app = document.querySelector<HTMLElement>("#app")!;
 let saving = false;
 let failed = false;
+let scaleFailed = false;
 let vault: { encrypted: boolean; locked: boolean; lockOnHide: boolean; legacyTemp: boolean } | null = null;
 let vaultError = "";
 let vaultLoadFailed = false;
@@ -33,7 +34,8 @@ function render() {
       ${category === "general" ? `<section class="settings-section" aria-labelledby="general-title"><h2 id="general-title">${t("general")}</h2><p class="section-description">${t("generalDescription")}</p>
         <div class="settings-card"><div class="setting-row"><div class="setting-label">${icon("language")}<label for="language-select">${t("language")}</label></div><select id="language-select" ${saving ? "disabled" : ""}><option value="zh-CN" lang="zh-CN" ${getLanguage() === "zh-CN" ? "selected" : ""}>简体中文</option><option value="en" lang="en" ${getLanguage() === "en" ? "selected" : ""}>English</option></select></div>
           <p class="setting-description">${t("languageDescription")}</p><p class="setting-hint">${t("languageHint")}</p></div>
-      </section><p class="settings-error" role="status">${failed ? t("settingsFailed") : ""}</p>` : `<section class="settings-section" aria-labelledby="privacy-title"><h2 id="privacy-title">${t("privacy")}</h2><p class="section-description">${t("privacyDescription")}</p>
+        <div class="settings-card scale-card"><div class="setting-row"><div class="setting-label"><label for="scale-select">${t("uiScale")}</label></div><select id="scale-select" ${saving ? "disabled" : ""}>${UI_SCALES.map((scale) => `<option value="${scale}" ${getUiScale() === scale ? "selected" : ""}>${scale}%</option>`).join("")}</select></div><p class="setting-description">${t("uiScaleDescription")}</p></div>
+      </section><p class="settings-error" role="status">${failed ? t("settingsFailed") : scaleFailed ? t("uiScaleFailed") : ""}</p>` : `<section class="settings-section" aria-labelledby="privacy-title"><h2 id="privacy-title">${t("privacy")}</h2><p class="section-description">${t("privacyDescription")}</p>
         ${isTauri() && vault ? `<div class="settings-card"><div class="setting-label">${icon("privacy")}<span>${t("encryption")}</span></div><p class="setting-description">${t("encryptionDescription")}</p>
           ${vault.encrypted ? `<p class="encryption-status">${icon("check")}${t("encryptionEnabled")}</p><label class="setting-checkbox"><input id="lock-on-hide" type="checkbox" ${vault.lockOnHide ? "checked" : ""} ${saving ? "disabled" : ""}/><span>${t("lockOnHide")}</span></label><p class="setting-hint">${t("lockOnHideHint")}</p>
           ${changingPassword ? `<form id="change-password-form" class="encryption-form"><label>${t("currentPassword")}<input id="current-password" type="password" autocomplete="current-password" required /></label><label>${t("newPassword")}<input id="new-password" type="password" autocomplete="new-password" required /></label><label>${t("confirmNewPassword")}<input id="confirm-new-password" type="password" autocomplete="new-password" required /></label><div class="password-actions"><button type="submit">${t("changePassword")}</button><button type="button" id="cancel-password" class="secondary-button">${t("cancel")}</button></div><p id="password-error" class="settings-error" role="alert"></p></form>` : `<button id="change-password" class="settings-action">${t("changePassword")}</button>${passwordChanged ? `<p class="settings-success" role="status">${t("passwordChanged")}</p>` : ""}`}` : `<form id="encryption-form" class="encryption-form"><label>${t("password")}<input type="password" id="password" autocomplete="new-password" required /></label><label>${t("confirmPassword")}<input type="password" id="confirm-password" autocomplete="new-password" required /></label><button type="submit" ${saving ? "disabled" : ""}>${t("enableEncryption")}</button></form>`}
@@ -65,6 +67,12 @@ function render() {
   });
   document.querySelector<HTMLInputElement>("#lock-on-hide")?.addEventListener("change", (event) => {
     void updateVault("set_lock_on_hide", { value: (event.target as HTMLInputElement).checked });
+  });
+  document.querySelector<HTMLSelectElement>("#scale-select")?.addEventListener("change", (event) => {
+    const value = Number((event.target as HTMLSelectElement).value);
+    if (!isUiScale(value)) return;
+    try { scaleFailed = false; setUiScale(value); }
+    catch (error) { scaleFailed = true; console.error(error); render(); }
   });
   document.querySelector("#change-password")?.addEventListener("click", () => { changingPassword = true; passwordChanged = false; render(); document.querySelector<HTMLInputElement>("#current-password")?.focus(); });
   document.querySelector("#cancel-password")?.addEventListener("click", () => { if (!saving) { changingPassword = false; render(); document.querySelector<HTMLElement>("#change-password")?.focus(); } });

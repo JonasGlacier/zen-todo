@@ -1,8 +1,11 @@
 import { isTauri } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 
 export type Language = "zh-CN" | "en";
-export type Settings = { language: Language };
+export const UI_SCALES = [100, 110, 125, 150] as const;
+export type UiScale = typeof UI_SCALES[number];
+export type Settings = { language: Language; uiScale: UiScale };
+export const isUiScale = (value: unknown): value is UiScale => UI_SCALES.includes(value as UiScale);
 
 const zh = {
   newList: "新列表", myTodos: "我的待办",
@@ -24,6 +27,7 @@ const zh = {
   openSettingsFailed: "无法打开设置窗口，请重试。", settingsDescription: "按你的习惯，调整 Zen Todo。",
   settingsNavigation: "设置分类", generalDescription: "管理应用的语言和通用偏好。", privacy: "隐私", privacyDescription: "管理本地数据的加密和锁定。", privacyDesktopOnly: "本地数据加密仅在桌面应用中可用。", privacyLoading: "正在读取加密状态…", privacyLoadFailed: "无法读取加密状态，请重新打开设置。",
   languageDescription: "选择界面使用的语言，不会修改你的待办内容。", savedAutomatically: "设置会自动保存",
+  uiScale: "界面缩放", uiScaleDescription: "调整整个应用中文字和控件的大小。", uiScaleFailed: "无法保存界面缩放设置，请重试。",
   encryption: "本地数据加密", encryptionDescription: "使用独立密码加密待办。忘记密码后无法恢复数据，请妥善保管。", encryptionEnabled: "加密已开启", password: "加密密码", confirmPassword: "再次输入密码", enableEncryption: "开启加密", passwordMismatch: "请输入相同的非空密码。", encryptionFailed: "操作失败，请重试并检查数据文件。", lockOnHide: "隐藏到托盘时锁定", lockOnHideHint: "关闭时仅在退出应用后锁定；开启后每次隐藏都需要重新输入密码。", unlock: "解锁", unlockTitle: "解锁待办", unlockHint: "请输入你的加密密码。", unlockFailed: "密码错误或数据已损坏。", legacyTempWarning: "发现旧版临时文件 todos.json.tmp，可能包含明文；请检查数据目录并自行处理。",
   noteColor: "便签颜色", noteColorNamed: "便签颜色：{color}",
   color_yellow: "柠檬黄", color_orange: "杏橙", color_pink: "蔷薇粉", color_purple: "薰衣草紫", color_blue: "雾蓝", color_green: "薄荷绿",
@@ -50,6 +54,7 @@ const en: Record<keyof typeof zh, string> = {
   openSettingsFailed: "Couldn't open settings. Please try again.", settingsDescription: "Make Zen Todo feel like home.",
   settingsNavigation: "Settings categories", generalDescription: "Manage your language and general preferences.", privacy: "Privacy", privacyDescription: "Manage local data encryption and locking.", privacyDesktopOnly: "Local data encryption is available in the desktop app.", privacyLoading: "Loading encryption status…", privacyLoadFailed: "Couldn't load encryption status. Please reopen settings.",
   languageDescription: "Choose the interface language. Your tasks stay as they are.", savedAutomatically: "Settings save automatically",
+  uiScale: "UI Scale", uiScaleDescription: "Scales text and controls across the whole app.", uiScaleFailed: "Couldn't save the UI scale. Please try again.",
   encryption: "Local data encryption", encryptionDescription: "Protect tasks with a separate password. Lost passwords cannot be recovered.", encryptionEnabled: "Encryption enabled", password: "Encryption password", confirmPassword: "Confirm password", enableEncryption: "Enable encryption", passwordMismatch: "Enter matching, non-empty passwords.", encryptionFailed: "Operation failed. Check the data file and try again.", lockOnHide: "Lock when hidden to tray", lockOnHideHint: "When off, lock only on exit; when on, hiding requires a password to reopen.", unlock: "Unlock", unlockTitle: "Unlock tasks", unlockHint: "Enter your encryption password.", unlockFailed: "Incorrect password or damaged data.", legacyTempWarning: "A legacy todos.json.tmp file exists and may contain plaintext; inspect it in the data directory.",
   noteColor: "Note color", noteColorNamed: "Note color: {color}",
   color_yellow: "Lemon", color_orange: "Apricot", color_pink: "Rose", color_purple: "Lavender", color_blue: "Mist blue", color_green: "Mint",
@@ -57,13 +62,27 @@ const en: Record<keyof typeof zh, string> = {
 };
 
 const settingsKey = "zen-todo-settings";
-let settings: Settings = { language: "zh-CN" };
+let settings: Settings = { language: "zh-CN", uiScale: 100 };
 try {
   const stored = JSON.parse(localStorage.getItem(settingsKey) ?? "null");
-  if (stored && (stored.language === "en" || stored.language === "zh-CN")) settings = stored;
+  if (stored && (stored.language === "en" || stored.language === "zh-CN")) {
+    settings = { language: stored.language, uiScale: isUiScale(stored.uiScale) ? stored.uiScale : 100 };
+  }
 } catch { /* A missing or invalid preference uses the default language. */ }
+document.documentElement.style.zoom = `${settings.uiScale}%`;
 
 export function getLanguage(): Language { return settings.language; }
+export function getUiScale(): UiScale { return settings.uiScale; }
+
+export function setUiScale(uiScale: UiScale) {
+  if (!isUiScale(uiScale) || uiScale === settings.uiScale) return;
+  const next = { ...settings, uiScale };
+  localStorage.setItem(settingsKey, JSON.stringify(next));
+  settings = next;
+  document.documentElement.style.zoom = `${uiScale}%`;
+  window.dispatchEvent(new Event("zen-settings-changed"));
+  if (isTauri()) void emit("ui-scale-changed", uiScale).catch(console.error);
+}
 
 export function setLanguage(language: Language) {
   if (language === settings.language) return;
@@ -73,15 +92,17 @@ export function setLanguage(language: Language) {
   window.dispatchEvent(new Event("zen-settings-changed"));
 }
 
-// storage covers browser windows; the native event also covers WebViews where
-// storage notifications can be delayed. Both paths deduplicate by language.
+// Storage covers browser windows; native events also cover delayed WebView notifications.
 export async function watchSettings(onChange: () => void): Promise<() => void> {
   const onStorage = (event: StorageEvent) => {
     if (event.key !== settingsKey) return;
     try {
       const next = JSON.parse(event.newValue ?? "null");
-      if (next && (next.language === "en" || next.language === "zh-CN") && next.language !== settings.language) {
-        settings = next;
+      if (next && (next.language === "en" || next.language === "zh-CN")) {
+        const uiScale = isUiScale(next.uiScale) ? next.uiScale : 100;
+        if (next.language === settings.language && uiScale === settings.uiScale) return;
+        settings = { language: next.language, uiScale };
+        document.documentElement.style.zoom = `${uiScale}%`;
         onChange();
       }
     } catch { /* Ignore incomplete or invalid settings from another window. */ }
@@ -93,10 +114,18 @@ export async function watchSettings(onChange: () => void): Promise<() => void> {
       try { setLanguage(payload); } catch (error) { console.error(error); }
     }
   }).catch(() => undefined) : undefined;
+  const unlistenScale = isTauri() ? await listen<number>("ui-scale-changed", ({ payload }) => {
+    if (isUiScale(payload) && payload !== settings.uiScale) {
+      settings = { ...settings, uiScale: payload };
+      document.documentElement.style.zoom = `${payload}%`;
+      onChange();
+    }
+  }).catch(() => undefined) : undefined;
   return () => {
     window.removeEventListener("storage", onStorage);
     window.removeEventListener("zen-settings-changed", onChange);
     unlisten?.();
+    unlistenScale?.();
   };
 }
 
