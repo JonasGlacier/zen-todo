@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  addSibling, addTodo, archiveList, canLink, canMove, countPrerequisites, createList, createWorkspace, deleteList, indentTodo,
+  NOTE_COLORS, addList, addSibling, addTodo, archiveList, ensureColors, nextColor, setListColor, canLink, canMove, countPrerequisites, createList, createWorkspace, deleteList, indentTodo,
   isBlocked, linkTodos, moveTodo, normalize, outdentTodo, reconcile, removeTodo, restoreList, toggleTodo,
 } from "../src/board.ts";
 
@@ -192,4 +192,29 @@ test("deleting the last active list creates a new one while retaining archived l
   assert.equal(workspace.lists[0], archived);
   assert.notEqual(workspace.activeListId, active.id);
   assert.equal(workspace.lists.find((list) => list.id === workspace.activeListId).archived, false);
+});
+
+test("new lists take the least-used note colour, continuing after the last list", () => {
+  const workspace = createWorkspace("a");
+  assert.equal(workspace.lists[0].color, "yellow");
+  const second = addList(workspace, "b");
+  assert.equal(second.color, "orange");
+  setListColor(workspace, second.id, "blue");
+  assert.equal(nextColor(workspace), "green");
+  for (let index = 0; index < 10; index++) addList(workspace, "x");
+  const counts = NOTE_COLORS.map((color) => workspace.lists.filter((list) => list.color === color).length);
+  assert.ok(Math.max(...counts) - Math.min(...counts) <= 1);
+});
+
+test("lists without a valid colour are given one", () => {
+  const workspace = createWorkspace("a");
+  const old = { id: "old", title: "old", board: { todos: [] } };
+  const bad = { id: "bad", title: "bad", board: { todos: [] }, color: "magenta" };
+  workspace.lists.push(old, bad);
+  assert.equal(ensureColors(workspace), true);
+  assert.ok(NOTE_COLORS.includes(old.color) && NOTE_COLORS.includes(bad.color));
+  assert.notEqual(old.color, "yellow");
+  assert.equal(ensureColors(workspace), false);
+  setListColor(workspace, "old", "nope");
+  assert.ok(NOTE_COLORS.includes(old.color));
 });

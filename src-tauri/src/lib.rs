@@ -68,6 +68,8 @@ struct TodoList {
     board: Board,
     #[serde(default)]
     archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

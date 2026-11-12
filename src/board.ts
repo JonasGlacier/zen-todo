@@ -10,14 +10,55 @@ export type Todo = {
 
 export type Board = { todos: Todo[] };
 
-export type TodoList = { id: string; title: string; board: Board; archived?: boolean };
+// Each list is a sticky note in one of a small, fixed set of paper colours.
+// Only the key is stored; the actual shades live in styles.css.
+export const NOTE_COLORS = ["yellow", "orange", "pink", "purple", "blue", "green"] as const;
+export type NoteColor = typeof NOTE_COLORS[number];
+
+export type TodoList = { id: string; title: string; board: Board; archived?: boolean; color?: NoteColor };
 export type Workspace = { lists: TodoList[]; activeListId: string };
 export type DropPlace = "before" | "after" | "into";
 
 const find = (board: Board, id: string | null | undefined) => board.todos.find((todo) => todo.id === id);
 
-export function createList(title = "新列表"): TodoList {
-  return { id: crypto.randomUUID(), title, board: { todos: [] }, archived: false };
+export const isNoteColor = (value: unknown): value is NoteColor => NOTE_COLORS.includes(value as NoteColor);
+
+// The least-used colour among open lists; ties continue the palette after the
+// most recent list so neighbouring notes differ.
+export function nextColor(workspace: Workspace): NoteColor {
+  const open = workspace.lists.filter((list) => !list.archived);
+  const counts = NOTE_COLORS.map((color) => open.filter((list) => list.color === color).length);
+  const last = NOTE_COLORS.indexOf(open[open.length - 1]?.color as NoteColor);
+  const order = NOTE_COLORS.map((_, index) => (last + 1 + index) % NOTE_COLORS.length);
+  return NOTE_COLORS[order.reduce((best, index) => counts[index] < counts[best] ? index : best, order[0])];
+}
+
+export function createList(title = "新列表", color: NoteColor = NOTE_COLORS[0]): TodoList {
+  return { id: crypto.randomUUID(), title, board: { todos: [] }, archived: false, color };
+}
+
+export function addList(workspace: Workspace, title = "新列表"): TodoList {
+  const list = createList(title, nextColor(workspace));
+  workspace.lists.push(list);
+  return list;
+}
+
+// Lists saved before colours existed (or with an unknown colour) get one.
+export function ensureColors(workspace: Workspace): boolean {
+  let changed = false;
+  const valid = workspace.lists.filter((list) => isNoteColor(list.color));
+  for (const list of workspace.lists) {
+    if (isNoteColor(list.color)) continue;
+    list.color = nextColor({ lists: valid, activeListId: "" });
+    valid.push(list);
+    changed = true;
+  }
+  return changed;
+}
+
+export function setListColor(workspace: Workspace, id: string, color: NoteColor): void {
+  const list = workspace.lists.find((item) => item.id === id);
+  if (list && isNoteColor(color)) list.color = color;
 }
 
 export function createWorkspace(title = "我的待办"): Workspace {
@@ -30,7 +71,7 @@ export function archiveList(workspace: Workspace, id: string, fallbackTitle = "�
   const index = workspace.lists.findIndex((list) => list.id === id);
   if (index < 0) return;
   workspace.lists[index].archived = true;
-  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(fallbackTitle));
+  if (!workspace.lists.some((list) => !list.archived)) addList(workspace, fallbackTitle);
   if (workspace.activeListId === id) {
     const next = workspace.lists.slice(index + 1).find((list) => !list.archived)
       ?? workspace.lists.slice(0, index).reverse().find((list) => !list.archived)!;
@@ -49,7 +90,7 @@ export function deleteList(workspace: Workspace, id: string, fallbackTitle = "�
   const index = workspace.lists.findIndex((list) => list.id === id);
   if (index < 0) return;
   workspace.lists.splice(index, 1);
-  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(fallbackTitle));
+  if (!workspace.lists.some((list) => !list.archived)) addList(workspace, fallbackTitle);
   if (workspace.activeListId === id) {
     workspace.activeListId = (workspace.lists.slice(index).find((list) => !list.archived)
       ?? workspace.lists.slice(0, index).reverse().find((list) => !list.archived)!).id;

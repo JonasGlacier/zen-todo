@@ -1,10 +1,10 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  addSibling, addTodo, archiveList, canMove, createList, createWorkspace, deleteList, indentTodo, isBlocked,
-  moveTodo, normalize, outdentTodo, prerequisites, reconcile, removeTodo, restoreList, toggleTodo,
+  NOTE_COLORS, addList, addSibling, addTodo, archiveList, canMove, createWorkspace, deleteList, ensureColors, indentTodo, isBlocked,
+  isNoteColor, moveTodo, normalize, outdentTodo, prerequisites, reconcile, removeTodo, restoreList, setListColor, toggleTodo,
 } from "./board";
-import type { Board, DropPlace, Todo, Workspace } from "./board";
+import type { Board, DropPlace, NoteColor, Todo, TodoList, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
 import { captureEditors, restoreEditors } from "./session";
@@ -31,6 +31,8 @@ const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => (
 })[character]!);
 const activeList = () => workspace.lists.find((list) => list.id === workspace.activeListId)!;
 const editorId = (id: string) => `todo-${id}`;
+const colorOf = (list: TodoList): NoteColor => isNoteColor(list.color) ? list.color : NOTE_COLORS[0];
+const colorName = (color: NoteColor) => t(`color_${color}`);
 const titleOf = (input: HTMLTextAreaElement) => input.value.replace(/[\r\n]+/g, " ").trim();
 
 async function persist() {
@@ -103,7 +105,7 @@ function archiveTemplate(): string {
     const tasks = list.board.todos.length
       ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("")
       : `<li class="muted">${t("emptyArchivedList")}</li>`;
-    return `<section class="archived-list">
+    return `<section class="archived-list" data-color="${colorOf(list)}">
       <div class="archived-header"><div class="archived-info"><span class="archived-name" title="${name}">${name}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span></div>
         <button class="restore-button" data-action="restore" data-id="${list.id}" title="${escapeHtml(t("restoreNamed", { title: list.title }))}" aria-label="${escapeHtml(t("restoreNamed", { title: list.title }))}">${icon("restore")} ${t("restoreList")}</button>
         <button class="delete-list-button icon-hold" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}" aria-label="${escapeHtml(t("holdDeleteNamedList", { title: list.title }))}">${icon("trash")}</button></div>
@@ -126,20 +128,28 @@ function render() {
   const available = pending.filter((todo) => !isBlocked(board, todo)).length;
   const completed = board.todos.length - pending.length;
   const roots = board.todos.filter((todo) => todo.nextId === null);
-  const content = showArchive ? archiveTemplate() : `<div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
-      <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
-      <button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
-      <button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button>
-    </div>`;
+  const color = colorOf(list);
+  const status = pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime");
+  const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
+  const content = showArchive ? archiveTemplate() : `<article class="note" data-color="${color}">
+      <header class="note-header" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${status}</span></div>
+        <div class="color-picker"><button class="icon-button" id="color-button" title="${t("noteColorNamed", { color: colorName(color) })}" aria-label="${t("noteColorNamed", { color: colorName(color) })}" aria-haspopup="true" aria-expanded="false" aria-controls="palette">${icon("palette")}</button>
+          <div class="palette" id="palette" role="group" aria-label="${t("noteColor")}" hidden>${swatches}</div></div>
+      </header>
+      <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
+        <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
+        <div class="list-actions"><button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
+        <button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button></div>
+      </div>
+    </article>`;
   app.innerHTML = `<section class="shell">
-    <div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
-    <header class="controls" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime")}</span></div>
+    <header class="titlebar"><div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
       <div class="window-actions"><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
     </header>
     <div class="workspace">
     ${content}
     <div class="tabs-bar">
-      <div class="tabs" role="tablist" aria-label="${t("todoLists")}">${visibleLists.map((item) => `<button class="tab ${!showArchive && item.id === workspace.activeListId ? "is-selected" : ""}" role="tab" aria-selected="${!showArchive && item.id === workspace.activeListId}" aria-controls="todo-list" data-list="${item.id}" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>`).join("")}</div>
+      <div class="tabs" role="tablist" aria-label="${t("todoLists")}">${visibleLists.map((item) => `<button class="tab ${!showArchive && item.id === workspace.activeListId ? "is-selected" : ""}" role="tab" data-color="${colorOf(item)}" aria-selected="${!showArchive && item.id === workspace.activeListId}" aria-controls="todo-list" data-list="${item.id}" title="${escapeHtml(item.title)}">${escapeHtml(item.title)}</button>`).join("")}</div>
       <button class="tab-action" id="new-list" title="${t("newList")}" aria-label="${t("newList")}">${icon("plus")}</button>
       <button class="tab-action ${showArchive ? "is-active" : ""}" id="archive-toggle" title="${t("archived")}${archivedCount ? ` · ${archivedCount}` : ""}" aria-label="${t("archived")}" aria-pressed="${showArchive}">${icon("archive")}</button>
     </div>
@@ -318,6 +328,40 @@ function clearDropMarks() {
   document.querySelectorAll(".is-dragging, .drop-before, .drop-after, .drop-into").forEach((node) => node.classList.remove("is-dragging", "drop-before", "drop-after", "drop-into"));
 }
 
+function setPalette(open: boolean) {
+  const palette = document.querySelector<HTMLElement>("#palette");
+  if (!palette) return;
+  palette.hidden = !open;
+  document.querySelector("#color-button")!.setAttribute("aria-expanded", String(open));
+  if (open) palette.querySelector<HTMLElement>(".swatch.is-selected")?.focus();
+}
+
+function bindPalette() {
+  const button = document.querySelector<HTMLButtonElement>("#color-button");
+  if (!button) return;
+  button.addEventListener("click", () => setPalette(document.querySelector<HTMLElement>("#palette")!.hidden));
+  document.querySelector(".color-picker")!.addEventListener("keydown", (event) => {
+    if ((event as KeyboardEvent).key !== "Escape") return;
+    event.stopPropagation();
+    setPalette(false);
+    button.focus();
+  });
+  document.querySelectorAll<HTMLButtonElement>("[data-set-color]").forEach((swatch) => {
+    swatch.addEventListener("click", () => {
+      const color = swatch.dataset.setColor;
+      if (!isNoteColor(color)) return;
+      const id = workspace.activeListId;
+      if (color === colorOf(activeList())) { setPalette(false); button.focus(); return; }
+      void change(() => { setListColor(workspace, id, color); }, "color-button");
+    });
+  });
+}
+
+// Clicking anywhere outside the open palette closes it without re-rendering.
+document.addEventListener("pointerdown", (event) => {
+  if (!(event.target as Element).closest?.(".color-picker")) setPalette(false);
+});
+
 function bindEvents() {
   document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
@@ -336,14 +380,14 @@ function bindEvents() {
   });
   document.querySelector("#new-list")!.addEventListener("click", () => {
     void change(() => {
-      const list = createList(t("newList"));
-      workspace.lists.push(list);
+      const list = addList(workspace, t("newList"));
       workspace.activeListId = list.id;
       board = list.board;
       showArchive = false;
       draggedId = null;
     });
   });
+  bindPalette();
   document.querySelector("#archive-back")?.addEventListener("click", () => { void change(() => { showArchive = false; }); });
   document.querySelector("#archive-toggle")!.addEventListener("click", () => {
     void change(() => { showArchive = !showArchive; draggedId = null; });
@@ -521,12 +565,13 @@ async function start() {
   workspace = stored ?? createWorkspace(t("myTodos"));
   if (!workspace.lists.length) throw new Error("Invalid workspace");
   for (const list of workspace.lists) normalize(list.board);
-  if (!workspace.lists.some((list) => !list.archived)) workspace.lists.push(createList(t("myTodos")));
+  if (!workspace.lists.some((list) => !list.archived)) addList(workspace, t("myTodos"));
+  const recolored = ensureColors(workspace);
   if (!workspace.lists.some((list) => list.id === workspace.activeListId && !list.archived)) {
     workspace.activeListId = workspace.lists.find((list) => !list.archived)!.id;
   }
   board = activeList().board;
-  if (isTauri() && !stored) await persist();
+  if (!stored || recolored) await persist().catch(console.error);
   restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);
   window.addEventListener("pagehide", dispose, { once: true });
