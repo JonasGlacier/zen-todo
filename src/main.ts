@@ -392,9 +392,9 @@ function bindEvents() {
   document.querySelector("#archive-toggle")!.addEventListener("click", () => {
     void change(() => { showArchive = !showArchive; draggedId = null; });
   });
-  const listName = document.querySelector<HTMLInputElement>("#list-name")!;
+  const listName = document.querySelector<HTMLInputElement>("#list-name");
   const listId = workspace.activeListId;
-  listName.addEventListener("blur", () => {
+  listName?.addEventListener("blur", () => {
     const list = workspace.lists.find((item) => item.id === listId);
     if (!list) return;
     const title = listName.value.trim();
@@ -410,7 +410,7 @@ function bindEvents() {
       if (tab) { tab.textContent = saved.title; tab.title = saved.title; }
     });
   });
-  listName.addEventListener("keydown", (event) => {
+  listName?.addEventListener("keydown", (event) => {
     if (event.isComposing) return;
     if (event.key === "Enter") { event.preventDefault(); listName.blur(); }
     if (event.key === "Escape") {
