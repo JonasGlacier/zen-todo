@@ -10,11 +10,8 @@
 .settings-category + .settings-category { margin-top: 4px; }
 .settings-autosave { display: flex; align-items: flex-start; gap: 6px; margin-top: auto; padding: 0 7px; color: var(--text-3); font-size: 10px; line-height: 1.6; }
 .settings-autosave .lucide { width: 12px; height: 16px; }
-.settings-main { min-width: 0; overflow-y: auto; padding: 27px 30px; }
-.settings-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding-bottom: 27px; }
-.settings-page-header h1 { margin: 0; font-size: 23px; font-weight: 600; letter-spacing: -.4px; }
-.settings-page-header p { margin: 9px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.6; }
-.settings-close { display: grid; width: 28px; height: 28px; flex: 0 0 auto; place-items: center; border-radius: 5px; color: var(--text-3); }
+.settings-main { min-width: 0; overflow-y: auto; padding: 48px 30px 27px; }
+.settings-close { position: absolute; z-index: 2; top: 10px; right: 18px; display: grid; width: 28px; height: 28px; place-items: center; border-radius: 5px; background: var(--surface); color: var(--text-3); }
 .settings-close:hover { background: var(--hover); color: var(--ink); }
 .settings-section + .settings-section { margin-top: 28px; }
 .settings-section h2 { margin: 0 0 7px; font-size: 14px; font-weight: 600; }
@@ -31,7 +28,7 @@
 @media (max-width: 540px) {
   .settings-layout { grid-template-columns: 125px minmax(0, 1fr); }
   .settings-sidebar { padding-right: 9px; padding-left: 9px; }
-  .settings-main { padding: 23px 18px; }
+  .settings-main { padding: 48px 18px 23px; }
   .settings-card { padding: 13px; }
   .setting-row { align-items: flex-start; flex-direction: column; gap: 12px; }
 }
