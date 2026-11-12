@@ -11,4 +11,5 @@ export const AI_PRESETS = {
   bigmodel: { baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "glm-4-flash" },
   siliconflow: { baseUrl: "https://api.siliconflow.cn/v1", model: "Qwen/Qwen2.5-7B-Instruct" },
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  openrouter: { baseUrl: "https://openrouter.ai/api/v1", model: "openrouter/free" },
 } as const;
