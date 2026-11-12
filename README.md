@@ -16,8 +16,9 @@ A lightweight floating todo app with nested subtasks for Windows 10 and 11, buil
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
 - Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
 - Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
-- Use the ✨ button or Ctrl+K to create/edit lists with AI, with one-step undo. AI first lists tasks, then breaks suitable tasks down into concrete subtasks. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
-- External Agents can use the bundled `zen-todo-cli.exe` to read lists, submit changes, and undo, including while the app is hidden in the tray. See [AI and CLI usage](docs/ai-and-cli.md).
+- Use Ctrl+Z or the Undo button to undo manual, AI and CLI workspace edits, up to the last **20 operations**. Text editing is undone locally before workspace actions. Navigation does not consume history. Hiding to the tray clears all history; hidden-mode CLI edits do not retain snapshots.
+- Use the ✨ button or Ctrl+K to create/edit lists with AI. AI first lists tasks, then breaks suitable tasks down into concrete subtasks. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
+- External Agents can use the bundled `zen-todo-cli.exe` to read lists, submit changes, and undo. Reading and applying changes also work while hidden in the tray. See [AI and CLI usage](docs/ai-and-cli.md).
 
 ## Privacy and storage
 
@@ -64,7 +65,9 @@ The Windows installer builds and installs the console CLI next to the GUI execut
 - 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
 - 顶部齿轮打开独立设置窗口，可切换简体中文 / English
 - 桌面版可在设置中启用独立密码加密，并选择隐藏到托盘时是否锁定
-- 点击便签头部 ✨ 或按 Ctrl+K，用自然语言创建和编辑清单；结果直接应用，并支持撤销最近一次 AI / Agent 更新
+- Ctrl+Z 或“撤销”按钮可连续撤销最近 **20次清单操作**，统一包含手动、AI 和 CLI 修改；输入文字时优先撤销当前文字编辑，切换清单等纯导航不占用历史
+- 成功隐藏到托盘后清空全部历史；隐藏期间的 CLI 修改不保留撤销快照，退出应用也会清空
+- 点击便签头部 ✨ 或按 Ctrl+K，用自然语言创建和编辑清单，结果直接应用
 - 设置 → AI 支持自定义 OpenAI 兼容接口、Ollama 本地模型及可编辑的服务商预设；支持保存配置和测试已保存的连接
 - 外部 Agent 可通过安装目录中的 `zen-todo-cli.exe` 读取、修改与撤销；隐藏到托盘后仍可操作，保险库锁定时拒绝读取和修改。详见 [AI 与 CLI 使用说明](docs/ai-and-cli.md)
 - 界面使用 Lucide SVG 图标，默认启用低内存托盘模式：收起时保存状态并销毁窗口，只保留托盘进程
@@ -87,7 +90,7 @@ The Windows installer builds and installs the console CLI next to the GUI execut
 
 API Key 存在 Windows 凭据管理器中，不写入待办或普通配置文件；留空会保留已有密钥，切换预设时默认清除旧密钥，输入新密钥会取消清除。Base URL 和模型名称保存在数据目录的 `ai-settings.json`。测试连接仅发送一条简短测试消息，使用已保存配置，不发送待办。实际执行 AI 指令时，会将当前清单与指令发送到所选接口，即使开启了本地文件加密。
 
-AI 生成期间仍可手动编辑；若数据已变化，旧生成结果会被拒绝应用。取消生成会丢弃本次结果，已发出的网络请求可能仍在服务端完成。撤销仅保留最近一次 AI / Agent 更新，后续手动修改后不能覆盖还原；退出或锁定保险库会清除该撤销快照。
+AI 生成期间仍可手动编辑；若数据已变化，旧生成结果会被拒绝应用。取消生成会丢弃本次结果，已发出的网络请求可能仍在服务端完成。手动、AI 和 CLI 修改共用最多20次的多级撤销历史，只有保存成功的操作才会记录；一次父子任务联动或一次 AI 更新整体算一次操作。历史只在内存中保留，成功隐藏到托盘或退出后清空，隐藏期间的修改不记录历史。
 
 ### 本地加密
 

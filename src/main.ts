@@ -10,6 +10,8 @@ import { icon } from "./icons";
 import { captureEditors, restoreEditors } from "./session";
 import type { UiSession } from "./session";
 import type { AgentResult, AiProposal } from "./ai";
+import { TextHistory, WorkspaceHistory } from "./history";
+import type { HistoryStatus, TextState } from "./history";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -31,6 +33,10 @@ let aiPrompt = "";
 let aiBusy = false;
 let aiGeneration = 0;
 let canUndo = false;
+let undoCount = 0;
+let suppressEmptyCleanup = false;
+const browserHistory = new WorkspaceHistory();
+const textHistories = new WeakMap<HTMLInputElement | HTMLTextAreaElement, TextHistory>();
 let remoteCount = 0;
 let remoteVersion = 0;
 
@@ -43,9 +49,19 @@ const colorOf = (list: TodoList): NoteColor => isNoteColor(list.color) ? list.co
 const colorName = (color: NoteColor) => t(`color_${color}`);
 const titleOf = (input: HTMLTextAreaElement) => input.value.replace(/[\r\n]+/g, " ").trim();
 
-async function persist() {
-  if (isTauri()) await invoke("save_board", { board: workspace });
-  else localStorage.setItem(browserKey, JSON.stringify(workspace));
+function setHistoryStatus(status: HistoryStatus) {
+  canUndo = status.canUndo;
+  undoCount = status.undoCount;
+}
+
+async function persist(recordHistory = false) {
+  if (isTauri()) setHistoryStatus(await invoke<HistoryStatus>("save_board", { board: workspace, recordHistory }));
+  else {
+    const previous = recordHistory ? JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null : null;
+    localStorage.setItem(browserKey, JSON.stringify(workspace));
+    if (previous) browserHistory.record(previous, workspace);
+    setHistoryStatus(browserHistory.status(workspace));
+  }
 }
 
 // Queue edits and clicks so a slow disk save never discards the next action.
@@ -56,8 +72,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
       message = "";
       mutate();
       reconcile(board);
-      await persist();
-      if (JSON.stringify(previous) !== JSON.stringify(workspace)) canUndo = false;
+      await persist(true);
     } catch (error) {
       saveFailures++;
       workspace = previous;
@@ -67,9 +82,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
     } finally {
       if (renderAfter) render();
       else {
-        const notice = document.querySelector<HTMLElement>(".notice")!;
-        notice.textContent = message;
-        notice.classList.toggle("visible", Boolean(message));
+        refreshNotice();
       }
       if (focus) {
         const target = document.getElementById(focus);
@@ -170,11 +183,31 @@ function render() {
     </div>
     </div>
     <footer class="footer"><span>${t("footer", { count: pending.length })}</span><span>${t("stayFocused")}</span></footer>
-    <div class="notice ${message || canUndo ? "visible" : ""}" role="status"><span>${escapeHtml(message)}</span>${canUndo ? `<button id="agent-undo">${icon("undo")} ${t("undo")}</button>` : ""}</div>
+    <div class="notice ${message || canUndo ? "visible" : ""}" role="status">${noticeContent()}</div>
   </section>`;
   bindEvents();
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
   document.querySelector(".list")!.scrollTop = listScroll;
+}
+
+function noticeContent() {
+  return `<span>${escapeHtml(message)}</span>${canUndo ? `<button id="workspace-undo" title="${t("undoShortcut")}" aria-label="${t("undoAvailable", { count: undoCount })}">${icon("undo")} ${t("undo")} · ${undoCount}</button>` : ""}`;
+}
+
+function bindUndo() {
+  const button = document.querySelector<HTMLButtonElement>("#workspace-undo");
+  // Keep focus until click so committing a title cannot replace this button
+  // between pointerdown and click.
+  button?.addEventListener("pointerdown", (event) => { event.preventDefault(); });
+  button?.addEventListener("click", () => { void undoWorkspace(); });
+}
+
+function refreshNotice() {
+  const notice = document.querySelector<HTMLElement>(".notice");
+  if (!notice) return;
+  notice.innerHTML = noticeContent();
+  notice.classList.toggle("visible", Boolean(message || canUndo));
+  bindUndo();
 }
 
 function renderKeepingEditors() {
@@ -188,37 +221,68 @@ function blurEditor() {
 }
 
 // Remote writes use the manual save queue. Rust owns the shared action engine
-// and undo record, including when no WebView exists in tray mode.
+// and the shared history. Tray mode deliberately retains no undo snapshots.
 function remoteOperation(command: string, args: Record<string, unknown>, success: string): Promise<boolean> {
   const failures = saveFailures;
+  const undoRequested = command === "agent_execute" && (args.request as { command?: string } | undefined)?.command === "undo";
+  const focusedEditor = document.activeElement?.id;
+  suppressEmptyCleanup = undoRequested;
   blurEditor();
+  suppressEmptyCleanup = false;
   remoteCount++;
   app.inert = true;
   let succeeded = false;
   const operation = pendingChange.then(async () => {
+    const before = workspace;
     try {
       if (command === "execute_cli_request") args.reject = suspending || failures !== saveFailures;
       else if (suspending || failures !== saveFailures) throw new Error(t("saveFailed"));
-      const result = await invoke<AgentResult>(command, args);
+      let result: AgentResult;
+      if (undoRequested && !isTauri()) {
+        const target = browserHistory.target(workspace);
+        if (!target) throw new Error("Nothing to undo");
+        localStorage.setItem(browserKey, JSON.stringify(target));
+        browserHistory.didUndo(target);
+        result = { command: "undo", workspace: target, revision: "", ...browserHistory.status(target) };
+      } else result = await invoke<AgentResult>(command, args);
       workspace = result.workspace;
       board = activeList().board;
-      canUndo = result.canUndo;
+      setHistoryStatus(result);
       if (result.command !== "list") showArchive = false;
       if (result.command !== "list") remoteVersion++;
       draggedId = null;
-      if (result.command !== "list") message = result.command === "undo" ? t("aiUndone") : success;
+      if (result.command !== "list") message = result.command === "undo" ? t("undoDone") : success;
       succeeded = true;
     } catch (error) {
-      message = String(error).includes("Conflict:") ? t("aiConflict") : t("aiFailed", { error: String(error) });
+      message = String(error).includes("Nothing to undo") ? t("nothingToUndo")
+        : String(error).includes("Conflict:") ? t("aiConflict") : t(undoRequested ? "undoFailed" : "aiFailed", { error: String(error) });
     }
     remoteCount--;
     if (!suspending) {
       app.inert = remoteCount > 0;
-      if (succeeded) render(); else renderKeepingEditors();
+      if (succeeded) {
+        render();
+        if (undoRequested && remoteCount === 0) focusAfterUndo(before, focusedEditor);
+      } else renderKeepingEditors();
     }
   });
   pendingChange = operation.catch(console.error);
   return operation.then(() => succeeded);
+}
+
+function undoWorkspace() {
+  return remoteOperation("agent_execute", { request: { command: "undo" } }, t("undoDone"));
+}
+
+function focusAfterUndo(before: Workspace, previousFocus?: string) {
+  const list = activeList();
+  const old = before.lists.find((item) => item.id === list.id);
+  const restored = list.board.todos.find((todo) => !old?.board.todos.some((item) => item.id === todo.id));
+  const edited = list.board.todos.find((todo) => old?.board.todos.some((item) => item.id === todo.id && item.title !== todo.title));
+  const id = restored?.id ?? edited?.id;
+  const target = id ? document.getElementById(editorId(id)) : old?.title !== list.title ? document.getElementById("list-name")
+    : previousFocus ? document.getElementById(previousFocus) : null;
+  (target ?? document.querySelector<HTMLElement>("[data-edit-todo], #list-name"))?.focus();
 }
 
 function toggleAi() {
@@ -334,6 +398,9 @@ async function suspendToTray() {
     if (session) session.pinned = pinned;
     if (initialized) await persist();
     await invoke("hide_window", { session });
+    browserHistory.clear();
+    canUndo = false;
+    undoCount = 0;
   } catch (error) {
     suspending = false;
     app.inert = false;
@@ -391,17 +458,24 @@ function handleTodoKey(input: HTMLTextAreaElement, event: KeyboardEvent) {
   const id = input.dataset.editTodo!;
   const todo = board.todos.find((item) => item.id === id);
   if (!todo) return;
-  const commit = () => { const title = titleOf(input); if (title) todo.title = title; };
+  const commit = () => {
+    const title = titleOf(input);
+    if (title && title !== todo.title) {
+      void change(() => { const target = board.todos.find((item) => item.id === id); if (target) target.title = title; }, undefined, false);
+    }
+    textHistories.delete(input);
+  };
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     if (!titleOf(input)) return;
+    commit();
     const newId = crypto.randomUUID();
-    void change(() => { commit(); addSibling(board, id, newId); }, editorId(newId));
+    void change(() => { addSibling(board, id, newId); }, editorId(newId));
   } else if (event.key === "Tab") {
     event.preventDefault();
     if (!titleOf(input)) return;
+    commit();
     void change(() => {
-      commit();
       if (event.shiftKey) outdentTodo(board, id); else indentTodo(board, id);
     }, editorId(id));
   } else if (event.key === "Backspace" && !input.value && !todo.title) {
@@ -476,7 +550,7 @@ function bindEvents() {
     if (key.key === "Enter" && !key.shiftKey) { key.preventDefault(); void runAi(); }
     if (key.key === "Escape") { key.stopPropagation(); if (aiBusy) cancelAi(); else toggleAi(); }
   });
-  document.querySelector("#agent-undo")?.addEventListener("click", () => { void remoteOperation("agent_execute", { request: { command: "undo" } }, t("aiUndone")); });
+  bindUndo();
   document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -575,7 +649,7 @@ function bindEvents() {
       if (!todo) return;
       const title = titleOf(input);
       // A brand-new task that was left empty is discarded.
-      if (!title && !todo.title) { void change(() => { removeTodo(board, id); }); return; }
+      if (!title && !todo.title) { if (!suppressEmptyCleanup) void change(() => { removeTodo(board, id); }); return; }
       if (!title || title === todo.title) { input.value = todo.title; resizeTodo(input); return; }
       // Keep the DOM intact so saving on blur doesn't swallow the next click.
       void change(() => { board.todos.find((item) => item.id === id)!.title = title; }, undefined, false).then(() => {
@@ -644,8 +718,62 @@ function bindEvents() {
   });
 }
 
+function textEditor(target: EventTarget | null): HTMLInputElement | HTMLTextAreaElement | null {
+  return (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+    && target.matches("#list-name, [data-edit-todo], #ai-prompt") && !target.readOnly && !target.disabled ? target : null;
+}
+
+function textState(input: HTMLInputElement | HTMLTextAreaElement): TextState {
+  return { value: input.value, start: input.selectionStart, end: input.selectionEnd };
+}
+
+document.addEventListener("focusin", (event) => {
+  const input = textEditor(event.target);
+  if (input) textHistories.set(input, new TextHistory(textState(input)));
+});
+document.addEventListener("focusout", (event) => {
+  const input = textEditor(event.target);
+  if (input) textHistories.delete(input);
+});
+document.addEventListener("beforeinput", (event) => {
+  const input = textEditor(event.target);
+  if (!input) return;
+  const history = textHistories.get(input) ?? new TextHistory(textState(input));
+  textHistories.set(input, history);
+  history.beforeInput(textState(input));
+}, true);
+document.addEventListener("input", (event) => {
+  const input = textEditor(event.target);
+  if (input) textHistories.get(input)?.input(textState(input), (event as InputEvent).inputType ?? "");
+}, true);
+
+function undoText(): boolean {
+  const input = textEditor(document.activeElement);
+  if (!input) return false;
+  let previous = textHistories.get(input)?.undo(input.value);
+  // Session-restored drafts and programmatic input can have no local text
+  // stack. Revert that draft before touching workspace operations.
+  const saved = input.id === "list-name" ? activeList().title
+    : input.dataset.editTodo ? board.todos.find((todo) => todo.id === input.dataset.editTodo)?.title : undefined;
+  if (!previous && saved !== undefined && input.value !== saved) {
+    previous = { value: saved, start: saved.length, end: saved.length };
+    textHistories.set(input, new TextHistory(previous));
+  }
+  if (!previous) return false;
+  input.value = previous.value;
+  input.setSelectionRange(previous.start, previous.end);
+  input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "historyUndo" }));
+  return true;
+}
+
 window.addEventListener("resize", () => document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo));
 document.addEventListener("keydown", (event) => {
+  if (event.isComposing || !initialized || suspending || event.altKey) return;
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === "z") {
+    event.preventDefault();
+    if (!undoText()) void undoWorkspace();
+    return;
+  }
   if (initialized && !suspending && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     toggleAi();
@@ -695,8 +823,7 @@ async function start() {
   if (!stored || recolored || normalized) await persist().catch(console.error);
   if (isTauri()) {
     const state = await invoke<AgentResult>("agent_execute", { request: { command: "list" } });
-    canUndo = state.canUndo;
-    if (canUndo) message = t("aiUpdated");
+    setHistoryStatus(state);
     const stopCliListener = await listen<string>("cli-request", ({ payload }) => {
       void remoteOperation("execute_cli_request", { id: payload, reject: false }, t("aiUpdated"));
     });

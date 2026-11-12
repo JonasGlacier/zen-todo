@@ -1,7 +1,7 @@
 use crate::{vault, Board, Todo, TodoList, VaultRuntime, Workspace};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::{collections::{HashMap, HashSet}, fs, sync::Mutex};
+use std::{collections::{HashMap, HashSet}, fs};
 use tauri::{AppHandle, Manager, Runtime};
 
 pub const COLORS: [&str; 6] = ["yellow", "orange", "pink", "purple", "blue", "green"];
@@ -37,9 +37,6 @@ pub struct Request {
     pub action: Option<Action>,
     pub revision: Option<String>,
 }
-
-#[derive(Default)]
-pub struct AgentRuntime(pub Mutex<Option<(Workspace, Workspace)>>);
 
 pub fn revision(workspace: &Workspace) -> String {
     hex::encode(Sha256::digest(serde_json::to_vec(workspace).unwrap()))
@@ -126,7 +123,7 @@ pub fn apply(workspace: &mut Workspace, action: &Action) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare(workspace: &Workspace, request: &Request, undo: &Option<(Workspace, Workspace)>) -> Result<Workspace, String> {
+fn prepare(workspace: &Workspace, request: &Request, history: &crate::history::History) -> Result<Workspace, String> {
     let mut target = workspace.clone();
     match request.command.as_str() {
         "apply" => {
@@ -136,9 +133,7 @@ fn prepare(workspace: &Workspace, request: &Request, undo: &Option<(Workspace, W
             apply(&mut target, action)?;
         }
         "undo" => {
-            let (before, after) = undo.as_ref().ok_or("Nothing to undo")?;
-            if workspace != after { return Err("Cannot undo after subsequent edits".into()); }
-            target = before.clone();
+            target = history.target(workspace)?;
         }
         _ => return Err("Unknown command".into()),
     }
@@ -154,18 +149,20 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
     let plaintext = if encrypted { vault::open(vault_state.key.as_ref().ok_or("Vault is locked")?, &bytes)? } else { bytes };
     let mut workspace: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
     workspace.normalize();
-    let runtime = app.state::<AgentRuntime>();
-    let mut undo = runtime.0.lock().map_err(|e| e.to_string())?;
+    let runtime = app.state::<crate::history::HistoryRuntime>();
+    let mut history = runtime.0.lock().map_err(|e| e.to_string())?;
     if request.command == "list" {
         let task_lists: Vec<_> = workspace.lists.iter().map(|list| serde_json::json!({"id":list.id,"title":list.title,"archived":list.archived,"todos":nested_todos(&list.board, None)})).collect();
-        return Ok(serde_json::json!({ "protocolVersion":2, "command":"list", "taskLists":task_lists, "revision": revision(&workspace), "workspace": workspace, "canUndo": undo.as_ref().is_some_and(|(_, after)| after == &workspace) }));
+        let status = history.status(&workspace);
+        return Ok(serde_json::json!({ "protocolVersion":2, "command":"list", "taskLists":task_lists, "revision": revision(&workspace), "workspace": workspace, "canUndo": status.can_undo, "undoCount":status.undo_count }));
     }
     let previous = workspace.clone();
-    workspace = prepare(&workspace, &request, &undo)?;
+    workspace = prepare(&workspace, &request, &history)?;
     let data = serde_json::to_vec(&workspace).map_err(|e| e.to_string())?;
     let data = if encrypted { vault::seal(vault_state.key.as_ref().ok_or("Vault is locked")?, &data)? } else { data };
     vault::atomic_write(&path, &data)?;
-    if request.command == "undo" { *undo = None; } else { *undo = Some((previous, workspace.clone())); }
+    if request.command == "undo" { history.did_undo(&workspace); }
+    else if crate::with_ui(app, |ui| ui.phase == crate::UiPhase::Visible && ui.ready)? { history.record(&previous, &workspace); }
     crate::with_ui(app, |ui| {
         if let Some(session) = ui.session.as_mut() {
             session["editors"] = serde_json::json!([]);
@@ -174,7 +171,8 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
         }
     })?;
     vault_state.sealed_session = None;
-    Ok(serde_json::json!({ "command":request.command, "revision": revision(&workspace), "workspace": workspace, "canUndo": undo.is_some() }))
+    let status = history.status(&workspace);
+    Ok(serde_json::json!({ "command":request.command, "revision": revision(&workspace), "workspace": workspace, "canUndo": status.can_undo, "undoCount":status.undo_count }))
 }
 
 #[tauri::command]
@@ -246,12 +244,13 @@ mod tests {
     fn revision_checks_prevent_overwriting_later_edits() {
         let workspace = fixture();
         let mut request = Request { command: "apply".into(), revision: Some(revision(&workspace)), action: Some(action(json!({"mode":"update","listId":"list","todos":[]}))) };
-        assert!(prepare(&workspace, &request, &None).is_ok());
+        let history = crate::history::History::default();
+        assert!(prepare(&workspace, &request, &history).is_ok());
         let mut edited = workspace.clone();
         edited.lists[0].board.todos[0].title = "Manually changed".into();
-        assert!(prepare(&edited, &request, &None).unwrap_err().starts_with("Conflict:"));
+        assert!(prepare(&edited, &request, &history).unwrap_err().starts_with("Conflict:"));
         request.revision = None;
-        assert!(prepare(&workspace, &request, &None).is_err());
+        assert!(prepare(&workspace, &request, &history).is_err());
     }
 
     #[test]
@@ -259,12 +258,13 @@ mod tests {
         let before = fixture();
         let mut after = before.clone();
         apply(&mut after, &action(json!({"mode":"create","title":"New","todos":[]}))).unwrap();
-        let undo = Some((before.clone(), after.clone()));
+        let mut history = crate::history::History::default();
+        history.record(&before, &after);
         let request = Request { command: "undo".into(), revision: None, action: None };
-        assert_eq!(prepare(&after, &request, &undo).unwrap(), before);
+        assert_eq!(prepare(&after, &request, &history).unwrap(), before);
         after.lists[0].title = "Later edit".into();
-        assert!(prepare(&after, &request, &undo).is_err());
-        assert!(prepare(&before, &request, &None).is_err());
+        assert!(prepare(&after, &request, &history).is_err());
+        assert!(prepare(&before, &request, &crate::history::History::default()).is_err());
     }
 
     #[test]

@@ -13,7 +13,9 @@ Zen Todo is a **todo list with nested subtasks**. Parents appear above their chi
 
 Zen Todo 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
 
-Changes apply immediately. The footer notice offers **Undo / 撤销** for the latest AI/Agent write. A manual edit or list switch invalidates that snapshot rather than discarding later work. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
+Changes apply immediately. **Ctrl+Z** and the footer **Undo / 撤销** button share up to **20 workspace operations** across manual, AI and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history**, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
+
+按 **Ctrl+Z** 或点击“撤销”，可连续撤销最近 **20次清单操作**，包括手动编辑、AI 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
 
 API presets are editable examples, not guarantees of free service or model availability. Small models are worth trying, but task quality and JSON reliability vary. Ollama's default example requires `ollama pull qwen2.5:7b` and a running local Ollama server.
 
@@ -38,10 +40,10 @@ Commands / 命令：
 
 ```sh
 zen-todo-cli schema               # protocol and examples, no running app required
-zen-todo-cli list                 # nested taskLists, flat workspace, revision, canUndo
+zen-todo-cli list                 # nested taskLists, flat workspace, revision, canUndo, undoCount
 zen-todo-cli apply request.json   # submit UTF-8 JSON from a file
 zen-todo-cli apply -              # submit JSON from stdin
-zen-todo-cli undo                 # undo latest AI/Agent write
+zen-todo-cli undo                 # undo the latest workspace operation (manual, AI or CLI)
 ```
 
 Success writes JSON to stdout and exits 0. Failure writes a JSON error to stderr and exits 1. `schema` and `--help` work offline without an instance. Requests use an authenticated loopback connection; the current port and random session token are in `%APPDATA%/com.zentodo.app/cli-session.json`. Do not pass that token to the language model. The file is replaced on each app start; a stale file does not mean the app is running.
@@ -110,9 +112,9 @@ For tools that prefer a flat representation, `workspace.lists[].board.todos` sto
 
 习惯扁平结构的工具也可使用 `parentId` 指向父任务，顶层任务为 `null`；内部 `workspace` 使用此表示。AI 生成推荐使用嵌套 `children`，不要同时提交相互冲突的父子关系。协议版本 **2** 不再接受新请求中的 `nextId`；旧版存储会自动按父子关系读取，下一次保存时写入 `parentId`，保留原任务 ID、标题和创建时间，并按子任务重算父任务完成状态。
 
-If the workspace changes between `list` and `apply`, the update fails with a conflict. Re-read and re-plan rather than blindly replaying the old request. The foreground UI commits its active editor and flushes its save queue before processing CLI requests; a failed pending save rejects the CLI request. When hidden, Rust applies and encrypts changes directly, and stale editor drafts are discarded before the next restore. Undo is in-memory, one level, and cleared on exit or vault lock.
+If the workspace changes between `list` and `apply`, the update fails with a conflict. Re-read and re-plan rather than blindly replaying the old request. The foreground UI commits its active editor and flushes its save queue before processing CLI requests; a failed pending save rejects the CLI request. When hidden, Rust applies and encrypts changes directly, and stale editor drafts are discarded before the next restore. Undo history is in-memory, limited to 20 operations, and cleared on every successful hide to tray or app exit. Check `canUndo` and `undoCount` before undoing: the latest operation may be a manual edit, not your Agent's previous write.
 
-出现冲突时，应重新读取清单并重新规划，不要直接覆盖。前台 CLI 操作会等待编辑器保存；后台操作由 Rust 统一处理并按当前加密状态落盘。后台修改后会丢弃旧界面草稿，防止恢复窗口时旧内容盖住新内容。撤销仅保留一层，退出应用或锁定保险库后清除。
+出现冲突时，应重新读取清单并重新规划，不要直接覆盖。前台 CLI 操作会等待编辑器保存；后台操作由 Rust 统一处理并按当前加密状态落盘。后台修改后会丢弃旧界面草稿，防止恢复窗口时旧内容盖住新内容。历史最多保留20次，成功隐藏到托盘或退出后清除，隐藏期间不记录历史。CLI 撤销前应检查 `canUndo`、`undoCount`：最近一次操作也可能是用户的手动编辑，而不是 Agent 的上次写入。
 
 ### Suggested Agent instruction / 可交给 Agent 的指令
 

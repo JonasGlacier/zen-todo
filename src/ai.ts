@@ -1,7 +1,7 @@
 import type { Workspace } from "./board";
 
 export type AiSettings = { baseUrl: string; model: string; apiKey: string };
-export type AgentResult = { workspace: Workspace; revision: string; canUndo: boolean; command: string };
+export type AgentResult = { workspace: Workspace; revision: string; canUndo: boolean; undoCount: number; command: string };
 export type AiProposal = { action: unknown; revision: string };
 
 // Presets are editable examples; availability and pricing belong to providers.

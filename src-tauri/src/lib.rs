@@ -5,6 +5,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, RunEven
 mod vault;
 mod agent;
 mod ai;
+mod history;
 pub mod cli;
 
 #[derive(Default)]
@@ -140,15 +141,28 @@ fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Option<Workspace>, String
 }
 
 #[tauri::command]
-fn save_board<R: Runtime>(app: AppHandle<R>, mut board: Workspace) -> Result<(), String> {
+fn save_board<R: Runtime>(app: AppHandle<R>, mut board: Workspace, record_history: Option<bool>) -> Result<history::Status, String> {
     let state = app.state::<VaultRuntime>();
     let vault = state.0.lock().map_err(|e| e.to_string())?;
     let path = data_file(&app)?;
+    let existing = if path.exists() { Some(fs::read(&path).map_err(|e| e.to_string())?) } else { None };
+    let encrypted = match existing.as_ref() { Some(data) => vault::is_encrypted(data)?, None => vault.key.is_some() };
+    let previous: Option<Workspace> = if record_history.unwrap_or(false) {
+        existing.as_ref().map(|data| {
+            let plaintext = if encrypted { vault::open(vault.key.as_ref().ok_or("Vault locked")?, data)? } else { data.clone() };
+            let mut previous: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
+            previous.normalize();
+            Ok::<_, String>(previous)
+        }).transpose()?
+    } else { None };
     board.normalize();
     let contents = serde_json::to_vec(&board).map_err(|error| error.to_string())?;
-    let encrypted = if path.exists() { vault::is_encrypted(&fs::read(&path).map_err(|e| e.to_string())?)? } else { vault.key.is_some() };
     let contents = if encrypted || vault.key.is_some() { vault::seal(vault.key.as_ref().ok_or("Vault locked")?, &contents)? } else { contents };
-    vault::atomic_write(&path, &contents)
+    let runtime = app.state::<history::HistoryRuntime>();
+    let mut history = runtime.0.lock().map_err(|e| e.to_string())?;
+    vault::atomic_write(&path, &contents)?;
+    if let Some(previous) = previous { history.record(&previous, &board); }
+    Ok(history.status(&board))
 }
 
 fn lock_on_hide(path: &std::path::Path) -> Result<bool, String> {
@@ -274,7 +288,6 @@ async fn hide_window<R: Runtime>(app: AppHandle<R>, session: Option<serde_json::
                 let sealed = session.as_ref().map(|s| serde_json::to_vec(s).map_err(|e| e.to_string()).and_then(|v| vault::seal(key, &v))).transpose()?;
                 with_ui(&app, |ui| ui.session = None)?;
                 vault.sealed_session = sealed;
-                *app.state::<agent::AgentRuntime>().0.lock().map_err(|e| e.to_string())? = None;
                 locked_key = vault.key.take();
             }
             Ok(())
@@ -306,15 +319,31 @@ async fn hide_window<R: Runtime>(app: AppHandle<R>, session: Option<serde_json::
     let remaining: HashSet<_> = ["settings", "main"].iter()
         .filter(|label| app.get_webview_window(label).is_some())
         .map(|label| label.to_string()).collect();
-    let show = with_ui(&app, |ui| {
+    with_ui(&app, |ui| {
         if ui.phase != UiPhase::Suspending { return false; }
         ui.destroying.retain(|label| remaining.contains(label));
-        if !ui.destroying.is_empty() { return false; }
-        ui.phase = UiPhase::Hidden;
-        std::mem::take(&mut ui.show_requested)
+        true
     })?;
+    let show = finish_suspension(&app)?;
     if show { show_main(&app); }
     Ok(())
+}
+
+// Clear history only after every WebView was successfully destroyed, before a
+// tray restore or hidden CLI request can observe the next lifecycle phase.
+fn finish_suspension<R: Runtime>(app: &AppHandle<R>) -> Result<bool, String> {
+    let vault = app.state::<VaultRuntime>();
+    let _vault = vault.0.lock().map_err(|e| e.to_string())?;
+    let runtime = app.state::<history::HistoryRuntime>();
+    let mut history = runtime.0.lock().map_err(|e| e.to_string())?;
+    with_ui(app, |ui| finish_suspension_state(ui, &mut history))
+}
+
+fn finish_suspension_state(ui: &mut UiState, history: &mut history::History) -> bool {
+    if ui.phase != UiPhase::Suspending || !ui.destroying.is_empty() { return false; }
+    history.clear();
+    ui.phase = UiPhase::Hidden;
+    std::mem::take(&mut ui.show_requested)
 }
 
 #[tauri::command]
@@ -448,7 +477,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(UiRuntime::default())
         .manage(VaultRuntime::default())
-        .manage(agent::AgentRuntime::default())
+        .manage(history::HistoryRuntime::default())
         .manage(cli::CliRuntime::default())
         .setup(|app| {
             cli::start(app.handle().clone())?;
@@ -482,18 +511,14 @@ pub fn run() {
                     if emit { let _ = window.emit("tray-hide-requested", ()); }
                 }
                 WindowEvent::Destroyed => {
-                    let show = with_ui(window.app_handle(), |ui| {
+                    let _ = with_ui(window.app_handle(), |ui| {
                         ui.destroying.remove(window.label());
-                        if ui.phase == UiPhase::Suspending && ui.destroying.is_empty() {
-                            ui.phase = UiPhase::Hidden;
-                            return std::mem::take(&mut ui.show_requested);
-                        }
                         if window.label() == "main" && ui.phase != UiPhase::Suspending {
                             ui.phase = UiPhase::Hidden;
                             ui.ready = false;
                         }
-                        false
-                    }).unwrap_or(false);
+                    });
+                    let show = finish_suspension(window.app_handle()).unwrap_or(false);
                     if show { show_main(window.app_handle()); }
                 }
                 _ => {}
@@ -509,4 +534,33 @@ pub fn run() {
                 if code.is_none() { api.prevent_exit(); }
             }
         });
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+
+    #[test]
+    fn tray_transition_clears_history_only_after_all_windows_are_destroyed() {
+        let before: Workspace = serde_json::from_value(serde_json::json!({"activeListId":"a","lists":[{"id":"a","title":"Before","board":{"todos":[]}}]})).unwrap();
+        let mut after = before.clone();
+        after.lists[0].title = "After".into();
+        let mut history = history::History::default();
+        history.record(&before, &after);
+        let mut ui = UiRuntime::default().0.into_inner().unwrap();
+        ui.phase = UiPhase::Suspending;
+        ui.destroying.insert("main".into());
+        assert!(!finish_suspension_state(&mut ui, &mut history));
+        assert!(history.status(&after).can_undo);
+        // A failed hide returns to Visible and must retain the history.
+        ui.phase = UiPhase::Visible;
+        ui.destroying.clear();
+        assert!(!finish_suspension_state(&mut ui, &mut history));
+        assert!(history.status(&after).can_undo);
+        ui.phase = UiPhase::Suspending;
+        ui.show_requested = true;
+        assert!(finish_suspension_state(&mut ui, &mut history));
+        assert!(ui.phase == UiPhase::Hidden);
+        assert!(!history.status(&after).can_undo);
+    }
 }

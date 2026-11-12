@@ -8,6 +8,7 @@ export type Settings = { language: Language; uiScale: UiScale };
 export const isUiScale = (value: unknown): value is UiScale => UI_SCALES.includes(value as UiScale);
 
 const zh = {
+  undoShortcut: "撤销（Ctrl+Z）", undoAvailable: "撤销最近一次操作，还可撤销 {count} 次", undoDone: "已撤销上一次操作", nothingToUndo: "没有可撤销的操作", undoFailed: "撤销失败：{error}",
   aiPlanningHint: "先列出任务，再将适合的任务拆分为更具体的子任务。",
   agentSetup: "连接你的 Agent", agentCopyPrompt: "复制提示词给你的 Agent", agentCopyHint: "复制后粘贴给 OpenCode、Claude Code 等支持终端的 Agent。提示词自动包含本机 CLI 路径，无需配置应用内模型或 API Key。", agentCopying: "正在复制…", agentCopied: "已复制，粘贴给你的 Agent 即可。", agentCopyFailed: "复制失败：{error}",
   aiTest: "测试已保存的连接", aiTestOk: "连接成功", aiTestFailed: "连接失败：{error}",
@@ -39,6 +40,7 @@ const zh = {
 };
 
 const en: Record<keyof typeof zh, string> = {
+  undoShortcut: "Undo (Ctrl+Z)", undoAvailable: "Undo the last operation; {count} undo steps available", undoDone: "Last operation undone", nothingToUndo: "Nothing to undo", undoFailed: "Couldn't undo: {error}",
   aiPlanningHint: "First list the tasks, then break suitable tasks into more specific subtasks.",
   agentSetup: "Connect your Agent", agentCopyPrompt: "Copy instructions for your Agent", agentCopyHint: "Paste into a terminal-capable Agent such as OpenCode or Claude Code. Instructions include this computer's CLI path automatically. No in-app model or API key setup is needed.", agentCopying: "Copying…", agentCopied: "Copied. Paste into your Agent to get started.", agentCopyFailed: "Couldn't copy: {error}",
   aiTest: "Test saved connection", aiTestOk: "Connection successful", aiTestFailed: "Connection failed: {error}",
