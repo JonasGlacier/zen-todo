@@ -55,3 +55,5 @@
 .ai-settings-form label:not(.setting-checkbox) { display: grid; gap: 6px; font-size: 12px; }
 .ai-settings-form input:not([type="checkbox"]), .ai-settings-form select { width: 100%; min-width: 0; padding: 7px 8px; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--surface); color: var(--ink); font-size: 12px; }
 .ai-settings-form .setting-hint, .ai-settings-form .setting-description { margin: 0; }
+.agent-setup { margin-bottom: 16px; }
+.agent-setup .settings-action:disabled { opacity: .5; }

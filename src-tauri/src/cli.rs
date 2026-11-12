@@ -88,6 +88,32 @@ fn session_path() -> Result<PathBuf, String> {
     Ok(dirs::data_dir().ok_or("Cannot locate application data")?.join("com.zentodo.app").join("cli-session.json"))
 }
 
+#[tauri::command]
+pub fn copy_agent_prompt(language: String) -> Result<(), String> {
+    let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+    let directory = executable.parent().ok_or("Cannot locate the application directory")?;
+    let mut cli = directory.join("zen-todo-cli.exe");
+    // `tauri dev` builds the GUI in debug; the installer build produces a release CLI.
+    if cfg!(debug_assertions) && !cli.is_file() && directory.file_name().is_some_and(|name| name == "debug") {
+        cli = directory.parent().ok_or("Cannot locate the build directory")?.join("release/zen-todo-cli.exe");
+    }
+    if !cli.is_file() {
+        return Err(if language == "en" {
+            "zen-todo-cli.exe is missing. Reinstall the app; for development, run npm run build:cli."
+        } else {
+            "未找到 zen-todo-cli.exe，请重新安装应用；开发环境请先执行 npm run build:cli。"
+        }.into());
+    }
+    let path = cli.to_str().ok_or("CLI path is not valid Unicode")?;
+    let quoted = path.replace('\'', "''");
+    let prompt = if language == "en" {
+        format!("Please use the Zen Todo CLI to manage my task lists.\n\nThe CLI's absolute path on this computer is:\n{path}\n\nStart by learning the protocol with schema, then read the workspace with list. PowerShell commands (use the appropriate quoting if your shell differs):\n& '{quoted}' schema\n& '{quoted}' list\n\nFollow my request and submit changes with apply using a UTF-8 JSON file or stdin. Updates require revision and listId from list. todos is the COMPLETE target list: include every task to retain and preserve its existing ID. nextId points from a prerequisite to its next step. On conflict, read again and re-plan. Use undo to revert the latest AI/Agent update when requested.\n\nZen Todo must be running (it may be hidden in the tray) and unlocked. Do not edit its data or session files directly. No API key or model configuration in Zen Todo is needed for this CLI workflow. After writing, read the result with list and briefly summarize the changes. If I have not provided a task request yet, ask what I would like to create or change.")
+    } else {
+        format!("请通过 Zen Todo CLI 帮我管理待办清单。\n\n本机 CLI 的绝对路径是：\n{path}\n\n请先运行 schema 学习协议，再运行 list 读取工作区。PowerShell 命令如下（使用其他 Shell 时请按对应规则引用路径）：\n& '{quoted}' schema\n& '{quoted}' list\n\n根据我的要求，通过 UTF-8 JSON 文件或标准输入执行 apply。更新时使用 list 返回的 revision 和明确的 listId。todos 是完整的目标清单：提交所有希望保留的待办，并保留其原始 ID。nextId 从“上一步”指向“下一步”。遇到冲突先重新读取并重新规划。需要撤销时使用 undo 撤销最近一次 AI / Agent 更新。\n\nZen Todo 必须保持运行，可以隐藏到托盘，但保险库需要解锁。不要直接修改应用的数据文件或会话文件。通过 CLI 操作无需在 Zen Todo 中配置模型或 API Key。写入后请用 list 检查结果，并简短说明修改了什么。如果我还没有提供具体任务需求，请询问我想创建或调整什么清单。")
+    };
+    arboard::Clipboard::new().map_err(|e| e.to_string())?.set_text(prompt).map_err(|e| e.to_string())
+}
+
 /// Console entry point, kept separate from the GUI-subsystem Windows binary.
 pub fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();

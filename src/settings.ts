@@ -23,11 +23,16 @@ let aiClearKey = false;
 let aiLoaded = !isTauri();
 let aiStatus = "";
 let aiError = false;
+let copyingAgentPrompt = false;
+let agentCopyStatus = "";
+let agentCopyError = false;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 document.body.classList.add("settings-window");
 
 function aiPage(): string {
-  return `<section class="settings-section"><h2>${t("ai")}</h2><p class="section-description">${t("aiDescription")}</p>${isTauri() ? `<form id="ai-settings-form" class="settings-card ai-settings-form"><fieldset ${saving || !aiLoaded ? "disabled" : ""}>
+  return `<section class="settings-section"><h2>${t("ai")}</h2><p class="section-description">${t("aiDescription")}</p>
+    <div class="settings-card agent-setup"><div class="setting-label">${icon("ai")}<span>${t("agentSetup")}</span></div><p class="setting-description">${t("agentCopyHint")}</p><button class="settings-action" id="copy-agent-prompt" ${copyingAgentPrompt || !isTauri() ? "disabled" : ""}>${t(copyingAgentPrompt ? "agentCopying" : "agentCopyPrompt")}</button><p class="${agentCopyError ? "settings-error" : "settings-success"}" role="status">${escapeHtml(agentCopyStatus)}</p></div>
+    ${isTauri() ? `<form id="ai-settings-form" class="settings-card ai-settings-form"><fieldset ${saving || !aiLoaded ? "disabled" : ""}>
     <label>${t("aiPreset")}<select id="ai-preset">${Object.keys(AI_PRESETS).map((key) => `<option value="${key}" ${aiPreset === key ? "selected" : ""}>${key === "custom" ? t("aiCustom") : { ollama: "Ollama (local)", bigmodel: "BigModel", siliconflow: "SiliconFlow", openai: "OpenAI" }[key]}</option>`).join("")}</select></label>
     <label>${t("aiBaseUrl")}<input id="ai-base-url" type="url" value="${escapeHtml(aiSettings.baseUrl)}" required placeholder="https://example.com/v1" /></label>
     <label>${t("aiModel")}<input id="ai-model" value="${escapeHtml(aiSettings.model)}" required maxlength="200" /></label>
@@ -96,6 +101,7 @@ function render() {
   document.querySelector<HTMLInputElement>("#ai-clear-key")?.addEventListener("change", (event) => { aiClearKey = (event.target as HTMLInputElement).checked; });
   document.querySelector("#ai-settings-form")?.addEventListener("submit", (event) => { event.preventDefault(); void saveAi(); });
   document.querySelector("#ai-test")?.addEventListener("click", () => { void testAi(); });
+  document.querySelector("#copy-agent-prompt")?.addEventListener("click", () => { void copyAgentPrompt(); });
   document.querySelector<HTMLFormElement>("#encryption-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const password = document.querySelector<HTMLInputElement>("#password")!.value;
@@ -125,6 +131,21 @@ function render() {
   const main = document.querySelector<HTMLElement>(".settings-main");
   if (main) main.scrollTop = scrollTop;
   if (focused) document.getElementById(focused)?.focus();
+}
+
+async function copyAgentPrompt() {
+  if (copyingAgentPrompt || !isTauri()) return;
+  copyingAgentPrompt = true;
+  agentCopyStatus = "";
+  agentCopyError = false;
+  render();
+  try {
+    await invoke("copy_agent_prompt", { language: getLanguage() });
+    agentCopyStatus = t("agentCopied");
+  } catch (error) {
+    agentCopyError = true;
+    agentCopyStatus = t("agentCopyFailed", { error: String(error) });
+  } finally { copyingAgentPrompt = false; render(); }
 }
 
 async function saveAi() {

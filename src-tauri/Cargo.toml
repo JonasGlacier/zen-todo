@@ -29,6 +29,7 @@ sha2 = "0.10"
 dirs = "6"
 keyring = { version = "3", features = ["windows-native"] }
 fs2 = "0.4"
+arboard = { version = "3", default-features = false }
 
 [[bin]]
 name = "zen-todo-cli"

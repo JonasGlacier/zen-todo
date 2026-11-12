@@ -458,7 +458,7 @@ pub fn run() {
                 _ => {}
             }
         })
-        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, change_encryption_password, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings, agent::agent_execute, cli::execute_cli_request, ai::get_ai_settings, ai::save_ai_settings, ai::run_ai_prompt, ai::test_ai_connection])
+        .invoke_handler(tauri::generate_handler![load_board, save_board, load_session, vault_status, enable_encryption, unlock_vault, change_encryption_password, set_lock_on_hide, main_ready, set_always_on_top, hide_window, start_dragging, set_language, open_settings, close_settings, agent::agent_execute, cli::execute_cli_request, cli::copy_agent_prompt, ai::get_ai_settings, ai::save_ai_settings, ai::run_ai_prompt, ai::test_ai_connection])
         .build(tauri::generate_context!())
         .expect("error while building Zen Todo")
         .run(|_, event| {

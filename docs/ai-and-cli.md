@@ -15,6 +15,10 @@ API presets are editable examples, not guarantees of free service or model avail
 
 ## CLI setup / CLI 使用
 
+**Quick start:** open **Settings → AI → Connect your Agent → Copy instructions for your Agent**, then paste into OpenCode, Claude Code or another terminal-capable Agent. The copied instructions already contain this computer's actual CLI path, shell quoting examples and the workflow. No path editing or in-app model/API key configuration is needed. Instructions follow the interface language. A missing CLI or clipboard failure is shown in Settings instead of reporting success.
+
+**快速开始：**打开 **设置 → AI → 连接你的 Agent → 复制提示词给你的 Agent**，粘贴给 OpenCode、Claude Code 等支持终端的 Agent 即可。提示词自动填写本机实际 CLI 路径，附带带引号的命令示例与操作规则，不需要手改路径，也无需配置应用内模型或 API Key。提示词语言跟随界面语言；CLI 缺失或剪贴板操作失败时会在设置中显示错误。
+
 The Windows installer includes **`zen-todo-cli.exe`** beside the GUI executable. Use its full path or add that directory to your own PATH. It is a separate console executable so Windows shells and Agents receive stdout, stderr and exit codes correctly. Keep Zen Todo running; it may be hidden in the tray. A locked vault rejects data access. The CLI never starts a second GUI or edits `todos.json` directly.
 
 Windows 安装包会将独立的控制台程序 `zen-todo-cli.exe` 放在应用安装目录。可使用完整路径，或自行将安装目录加入 PATH。应用必须保持运行，可以隐藏到托盘；锁定保险库后，CLI 不能读取或修改数据。
