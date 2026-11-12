@@ -1,10 +1,10 @@
 import {
-  Archive, ArchiveRestore, ArrowLeft, ArrowUpToLine, Check, ChevronRight, GripVertical, Languages,
+  Archive, ArchiveRestore, ArrowLeft, ListPlus, Check, ChevronRight, GripVertical, Languages,
   ListFilter, ListTodo, Minus, Palette, Pin, PinOff, Plus, Settings, ShieldCheck, SlidersHorizontal, Sparkles, RotateCcw, Trash2, X, createElement,
 } from "lucide";
 
 const icons = {
-  previous: ArrowUpToLine, chevron: ChevronRight, organize: ListFilter, settings: Settings,
+  subtask: ListPlus, chevron: ChevronRight, organize: ListFilter, settings: Settings,
   pin: Pin, pinOff: PinOff, hide: Minus, plus: Plus, close: X, check: Check,
   grip: GripVertical, empty: ListTodo, back: ArrowLeft, trash: Trash2, archive: Archive, restore: ArchiveRestore,
   general: SlidersHorizontal, language: Languages, privacy: ShieldCheck, palette: Palette,

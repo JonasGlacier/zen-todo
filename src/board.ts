@@ -1,11 +1,10 @@
-// Every task has any number of previous steps but at most one next step
-// (`nextId`), so the dependencies form a forest converging on its roots.
+// A task belongs to at most one parent and can contain any number of subtasks.
 export type Todo = {
   id: string;
   title: string;
   completed: boolean;
   createdAt: number;
-  nextId: string | null;
+  parentId: string | null;
 };
 
 export type Board = { todos: Todo[] };
@@ -97,34 +96,34 @@ export function deleteList(workspace: Workspace, id: string, fallbackTitle = "æˆ
   }
 }
 
-export function prerequisites(board: Board, id: string): Todo[] {
-  return board.todos.filter((todo) => todo.nextId === id);
+export function subtasks(board: Board, id: string): Todo[] {
+  return board.todos.filter((todo) => todo.parentId === id);
 }
 
-export function countPrerequisites(board: Board, id: string): number {
-  return prerequisites(board, id).reduce((sum, todo) => sum + 1 + countPrerequisites(board, todo.id), 0);
+export function countSubtasks(board: Board, id: string): number {
+  return subtasks(board, id).reduce((sum, todo) => sum + 1 + countSubtasks(board, todo.id), 0);
 }
 
-export function isBlocked(board: Board, todo: Todo): boolean {
-  return board.todos.some((item) => item.nextId === todo.id && !item.completed);
+export function orderedTodos(board: Board, parentId: string | null = null): Todo[] {
+  return board.todos.filter((todo) => todo.parentId === parentId).flatMap((todo) => [todo, ...orderedTodos(board, todo.id)]);
 }
 
-// True when `id` is `ancestorId` or lies somewhere before it in the chain.
+// True when `id` is `goal` or is a descendant of it.
 function leadsTo(board: Board, id: string | null, goal: string): boolean {
   const seen = new Set<string>();
   let current = find(board, id);
   while (current && !seen.has(current.id)) {
     if (current.id === goal) return true;
     seen.add(current.id);
-    current = find(board, current.nextId);
+    current = find(board, current.parentId);
   }
   return false;
 }
 
-export function canLink(board: Board, previousId: string, nextId: string): boolean {
-  const previous = find(board, previousId);
-  if (!previous || !find(board, nextId) || previousId === nextId || previous.nextId === nextId) return false;
-  return !leadsTo(board, nextId, previousId);
+export function canNest(board: Board, id: string, parentId: string): boolean {
+  const todo = find(board, id);
+  if (!todo || !find(board, parentId) || id === parentId || todo.parentId === parentId) return false;
+  return !leadsTo(board, parentId, id);
 }
 
 export function reconcile(board: Board): number {
@@ -133,70 +132,85 @@ export function reconcile(board: Board): number {
   do {
     changed = false;
     for (const todo of board.todos) {
-      if (todo.completed && isBlocked(board, todo)) {
-        todo.completed = false;
+      const children = subtasks(board, todo.id);
+      if (!children.length) continue;
+      const completed = children.every((child) => child.completed);
+      if (todo.completed !== completed) {
+        if (todo.completed) reset++;
+        todo.completed = completed;
         changed = true;
-        reset++;
       }
     }
   } while (changed);
   return reset;
 }
 
-export function normalize(board: Board): void {
+export function normalize(board: Board): boolean {
+  const previous = JSON.stringify(board);
   const ids = new Set(board.todos.map((todo) => todo.id));
   for (const todo of board.todos) {
-    todo.nextId = todo.nextId && todo.nextId !== todo.id && ids.has(todo.nextId) ? todo.nextId : null;
+    // Read old saved boards once, but only write the new parentId model.
+    const legacy = todo as Todo & { nextId?: string | null };
+    if (!Object.prototype.hasOwnProperty.call(todo, "parentId")) todo.parentId = legacy.nextId ?? null;
+    delete legacy.nextId;
+    todo.parentId = todo.parentId && todo.parentId !== todo.id && ids.has(todo.parentId) ? todo.parentId : null;
   }
   for (const todo of board.todos) {
     const seen = new Set([todo.id]);
     let current = todo;
-    while (current.nextId) {
-      if (seen.has(current.nextId)) { current.nextId = null; break; }
-      seen.add(current.nextId);
-      current = find(board, current.nextId)!;
+    while (current.parentId) {
+      if (seen.has(current.parentId)) { current.parentId = null; break; }
+      seen.add(current.parentId);
+      current = find(board, current.parentId)!;
     }
   }
   reconcile(board);
+  return JSON.stringify(board) !== previous;
 }
 
 export function toggleTodo(board: Board, id: string): number {
   const todo = find(board, id);
-  if (!todo || (!todo.completed && isBlocked(board, todo))) return 0;
-  todo.completed = !todo.completed;
+  if (!todo) return 0;
+  const completed = !todo.completed;
+  for (const item of board.todos) {
+    if (leadsTo(board, item.id, id)) item.completed = completed;
+  }
   return reconcile(board);
 }
 
-export function addTodo(board: Board, title = "", nextId: string | null = null, id: string = crypto.randomUUID()): Todo {
-  const next = find(board, nextId);
-  const todo: Todo = { id, title, completed: false, createdAt: Date.now(), nextId: next ? next.id : null };
+export function addTodo(board: Board, title = "", parentId: string | null = null, id: string = crypto.randomUUID()): Todo {
+  const parent = find(board, parentId);
+  const todo: Todo = { id, title, completed: false, createdAt: Date.now(), parentId: parent ? parent.id : null };
   board.todos.push(todo);
   reconcile(board);
   return todo;
 }
 
-// Same next step as `afterId`, placed right after it among its siblings.
+// Same parent as `afterId`, placed right after it among its siblings.
 export function addSibling(board: Board, afterId: string, id: string = crypto.randomUUID()): Todo | undefined {
   const after = find(board, afterId);
   if (!after) return undefined;
-  const todo: Todo = { id, title: "", completed: false, createdAt: Date.now(), nextId: after.nextId };
+  const todo: Todo = { id, title: "", completed: false, createdAt: Date.now(), parentId: after.parentId };
   board.todos.splice(board.todos.indexOf(after) + 1, 0, todo);
   reconcile(board);
   return todo;
 }
 
-export function linkTodos(board: Board, previousId: string, nextId: string): boolean {
-  if (!canLink(board, previousId, nextId)) return false;
-  find(board, previousId)!.nextId = nextId;
+export function nestTodo(board: Board, id: string, parentId: string): boolean {
+  if (!canNest(board, id, parentId)) return false;
+  find(board, id)!.parentId = parentId;
   reconcile(board);
   return true;
 }
 
-// Previous steps of a removed task move on to its next step.
+// Keep a deleted parent's subtasks by promoting them into its former position.
 export function removeTodo(board: Board, id: string): void {
   const todo = find(board, id);
   if (!todo) return;
-  for (const previous of prerequisites(board, id)) previous.nextId = todo.nextId;
+  const children = subtasks(board, id);
+  for (const child of children) child.parentId = todo.parentId;
+  for (const child of children) board.todos.splice(board.todos.indexOf(child), 1);
+  board.todos.splice(board.todos.indexOf(todo), 0, ...children);
   board.todos.splice(board.todos.indexOf(todo), 1);
   reconcile(board);
 }
@@ -204,33 +218,33 @@ export function removeTodo(board: Board, id: string): void {
 export function indentTodo(board: Board, id: string): boolean {
   const todo = find(board, id);
   if (!todo) return false;
-  const siblings = board.todos.filter((item) => item.nextId === todo.nextId);
-  const target = siblings[siblings.indexOf(todo) + 1];
-  return target ? linkTodos(board, id, target.id) : false;
+  const siblings = board.todos.filter((item) => item.parentId === todo.parentId);
+  const target = siblings[siblings.indexOf(todo) - 1];
+  return target ? nestTodo(board, id, target.id) : false;
 }
 
 export function outdentTodo(board: Board, id: string): boolean {
   const todo = find(board, id);
-  const parent = find(board, todo?.nextId);
+  const parent = find(board, todo?.parentId);
   if (!todo || !parent) return false;
-  todo.nextId = parent.nextId;
+  todo.parentId = parent.parentId;
   board.todos.splice(board.todos.indexOf(todo), 1);
-  board.todos.splice(board.todos.indexOf(parent), 0, todo);
+  board.todos.splice(board.todos.indexOf(parent) + 1, 0, todo);
   reconcile(board);
   return true;
 }
 
 export function canMove(board: Board, id: string, targetId: string, place: DropPlace): boolean {
   if (id === targetId || !find(board, id) || !find(board, targetId)) return false;
-  return place === "into" ? canLink(board, id, targetId) : !leadsTo(board, targetId, id);
+  return place === "into" ? canNest(board, id, targetId) : !leadsTo(board, targetId, id);
 }
 
 export function moveTodo(board: Board, id: string, targetId: string, place: DropPlace): boolean {
   if (!canMove(board, id, targetId, place)) return false;
-  if (place === "into") return linkTodos(board, id, targetId);
+  if (place === "into") return nestTodo(board, id, targetId);
   const todo = find(board, id)!;
   const target = find(board, targetId)!;
-  todo.nextId = target.nextId;
+  todo.parentId = target.parentId;
   board.todos.splice(board.todos.indexOf(todo), 1);
   board.todos.splice(board.todos.indexOf(target) + (place === "after" ? 1 : 0), 0, todo);
   reconcile(board);

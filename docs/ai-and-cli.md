@@ -4,12 +4,16 @@
 
 Configure an endpoint in **Settings → AI**, save, and optionally test the saved connection. Click ✨ or press **Ctrl+K** to enter a command, then press Enter. Shift+Enter inserts a line break. Examples:
 
-- `Create a checklist for releasing my app, with testing before publishing.`
-- `Break down the publishing task into a few prerequisite steps. Keep my other tasks.`
+- `Create a release checklist and break suitable tasks into concrete subtasks.`
+- `Break down the publishing task into subtasks. Keep my other tasks.`
 - `创建一份周末旅行清单。`
-- `把当前清单里的发布任务拆解成几个上一步，保留其他待办。`
+- `把整理行李拆分成具体的物品子任务，保留其他待办。`
 
-Changes apply immediately. The footer notice offers **Undo / 撤销** for the latest AI/Agent write. A manual edit or list switch invalidates that snapshot rather than discarding later work. Invalid JSON, duplicate IDs, unknown references and dependency cycles are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
+Zen Todo is a **todo list with nested subtasks**. Parents appear above their children. AI first writes a task list, then considers each task and breaks it down into more detailed subtasks where useful. For example, “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Simple items do not need forced subdivision.
+
+Zen Todo 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
+
+Changes apply immediately. The footer notice offers **Undo / 撤销** for the latest AI/Agent write. A manual edit or list switch invalidates that snapshot rather than discarding later work. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
 
 API presets are editable examples, not guarantees of free service or model availability. Small models are worth trying, but task quality and JSON reliability vary. Ollama's default example requires `ollama pull qwen2.5:7b` and a running local Ollama server.
 
@@ -34,7 +38,7 @@ Commands / 命令：
 
 ```sh
 zen-todo-cli schema               # protocol and examples, no running app required
-zen-todo-cli list                 # workspace (including archives), revision, canUndo
+zen-todo-cli list                 # nested taskLists, flat workspace, revision, canUndo
 zen-todo-cli apply request.json   # submit UTF-8 JSON from a file
 zen-todo-cli apply -              # submit JSON from stdin
 zen-todo-cli undo                 # undo latest AI/Agent write
@@ -51,23 +55,31 @@ Save the following as UTF-8 `request.json`, then run `zen-todo-cli apply request
   "command": "apply",
   "action": {
     "mode": "create",
-    "title": "Release",
+    "title": "旅行",
     "color": "green",
     "todos": [
-      { "id": "test", "title": "Run tests", "nextId": "publish" },
-      { "id": "publish", "title": "Publish release", "nextId": null }
+      {
+        "id": "pack",
+        "title": "整理旅行需要携带的物品",
+        "children": [
+          { "id": "shirts", "title": "衬衫3件" },
+          { "id": "underwear", "title": "内裤5件" },
+          { "id": "glasses", "title": "太阳镜" },
+          { "id": "brush", "title": "牙刷" }
+        ]
+      }
     ]
   }
 }
 ```
 
-`nextId` points **from a prerequisite to its next step**. Several prerequisites can point to one next step, but each task has at most one next step. New temporary IDs are mapped to real UUIDs, including references between them. New tasks default to incomplete.
+`todos` contains top-level tasks. **`children` contains a task's subtasks**, recursively. Omit `children` or use `[]` for a leaf task. Each task needs a unique `id`; new temporary IDs are mapped to UUIDs. New leaf tasks default to incomplete.
 
-`nextId` 是从“上一步”指向“下一步”。多个上一步可以指向同一个下一步；每个待办只有一个下一步。临时 ID 会统一转换为 UUID，并同步转换引用。
+`todos` 放顶层任务，**`children` 放该任务的子任务**，可以继续嵌套。叶子任务可省略 `children` 或填写 `[]`。每个任务都需要唯一 ID，新任务可用临时 ID，应用会统一转换为 UUID。
 
 ### Edit a list / 编辑清单
 
-First run `list`. Copy its `revision` and the target list's `id`. Submit:
+First run `list`. Prefer its **`taskLists`** field: each list already contains a nested `todos` tree that can be reused in an update. Copy the response's `revision` and the target list's `id`. Submit:
 
 ```json
 {
@@ -77,16 +89,26 @@ First run `list`. Copy its `revision` and the target list's `id`. Submit:
     "mode": "update",
     "listId": "COPY_LIST_ID_FROM_LIST",
     "todos": [
-      { "id": "EXISTING_TASK_ID", "title": "Updated task", "nextId": null },
-      { "id": "new-task", "title": "Another task", "nextId": null }
+      {
+        "id": "EXISTING_PARENT_ID",
+        "title": "整理旅行需要携带的物品",
+        "children": [
+          { "id": "EXISTING_SHIRTS_ID", "title": "衬衫3件", "completed": true },
+          { "id": "new-item", "title": "牙刷", "completed": false }
+        ]
+      }
     ]
   }
 }
 ```
 
-**`todos` is the complete target list. Omitted tasks are removed.** Include all tasks to retain. Existing task IDs and creation timestamps are preserved. Omitting `completed` preserves an existing task's state; omitting `nextId` detaches it. Adding unfinished prerequisites reopens blocked completed tasks. Updates to archived lists are rejected. `title` and `color` are optional on updates; new lists require `title`. Allowed colors: `yellow`, `orange`, `pink`, `purple`, `blue`, `green`. Maximum: 300 tasks, 200 characters per task title, 80 per list title.
+**`todos` and its `children` are the complete target tree. Omitted tasks and subtasks are removed.** Include every task to retain. Existing IDs and creation timestamps are preserved. Omitting `completed` preserves an existing leaf task's state. A parent's state is derived from its children: all complete → complete; any incomplete → incomplete. To complete/reopen a subtree through a full-state `apply`, set its leaf completion states. The UI's parent checkbox updates the whole subtree for you. Updates to archived lists are rejected. `title` and `color` are optional on updates; new lists require `title`. Allowed colors: `yellow`, `orange`, `pink`, `purple`, `blue`, `green`. Maximum: **300 tasks including subtasks**, 200 characters per task title, 80 per list title.
 
-**`todos` 是完整的目标清单，没提交的任务会被移除。** 更新时须保留所有希望保留的任务及其原始 ID。省略 `completed` 保留已有完成状态，省略 `nextId` 则断开该任务与下一步的关系。
+**`todos` 及其 `children` 是完整的目标树，没提交的任务或子任务会被移除。** 更新时须保留所有希望保留的待办和原始 ID。省略 `completed` 会保留已有叶子任务的完成状态；父任务的完成状态由子任务自动计算。通过完整状态的 `apply` 完成/取消整棵子任务树时，要更新其中的叶子任务状态；界面勾选父任务会自动完成这个操作。
+
+For tools that prefer a flat representation, `workspace.lists[].board.todos` stores each task with **`parentId`** (`null` for a root). Flat `action.todos` entries with `parentId` are also accepted. Prefer nested `children` for generation; do not mix conflicting parent references with nesting. Protocol version **2** does not accept `nextId` in new actions. Legacy saved files are read as parent/child relationships and written with `parentId` on the next save; IDs, titles and timestamps are retained, with parent completion recalculated.
+
+习惯扁平结构的工具也可使用 `parentId` 指向父任务，顶层任务为 `null`；内部 `workspace` 使用此表示。AI 生成推荐使用嵌套 `children`，不要同时提交相互冲突的父子关系。协议版本 **2** 不再接受新请求中的 `nextId`；旧版存储会自动按父子关系读取，下一次保存时写入 `parentId`，保留原任务 ID、标题和创建时间，并按子任务重算父任务完成状态。
 
 If the workspace changes between `list` and `apply`, the update fails with a conflict. Re-read and re-plan rather than blindly replaying the old request. The foreground UI commits its active editor and flushes its save queue before processing CLI requests; a failed pending save rejects the CLI request. When hidden, Rust applies and encrypts changes directly, and stale editor drafts are discarded before the next restore. Undo is in-memory, one level, and cleared on exit or vault lock.
 
@@ -94,6 +116,6 @@ If the workspace changes between `list` and `apply`, the update fails with a con
 
 ### Suggested Agent instruction / 可交给 Agent 的指令
 
-> Use `zen-todo-cli schema` to learn the protocol. Read the workspace with `list`, then submit `apply` using a UTF-8 file or stdin. For updates, include the returned revision and explicit listId, preserve existing IDs, and include every task that should remain. nextId points from a prerequisite to its next step. Re-read and re-plan on conflict. Do not directly edit the app's data or session files.
+> Use `zen-todo-cli schema`, then `list` and its nested `taskLists` view. First write a task list, then break each task into more detailed subtasks where useful. “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Submit the complete tree using `todos` and `children`, with a unique ID for every task. Updates need revision and listId; retain existing IDs, completion states and tasks outside the request. Re-read and re-plan on conflict. Never edit app data or session files directly.
 
-> 先执行 `zen-todo-cli schema` 学习协议，再用 `list` 读取清单。通过 UTF-8 文件或标准输入提交 `apply`。更新时附上 revision、明确 listId，保留已有任务 ID，并提交所有希望保留的待办。nextId 从上一步指向下一步。遇到冲突先重新读取并规划，不要直接编辑应用的数据文件或会话文件。
+> 先执行 `zen-todo-cli schema`，再用 `list` 的嵌套 `taskLists` 视图读取清单。先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可拆成“衬衫3件”“内裤5件”“太阳镜”“牙刷”。用 `todos` 和 `children` 提交完整的父子树，每个任务都使用唯一 ID。更新时附上 revision、明确 listId，保留原任务 ID、完成状态和请求范围外的待办。遇到冲突先重新读取并规划，不要直接编辑应用的数据文件或会话文件。

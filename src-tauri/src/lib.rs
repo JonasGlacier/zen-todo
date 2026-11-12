@@ -55,13 +55,45 @@ struct Todo {
     title: String,
     completed: bool,
     created_at: i64,
-    #[serde(default)]
-    next_id: Option<String>,
+    #[serde(default, alias = "nextId")]
+    parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 struct Board {
     todos: Vec<Todo>,
+}
+
+impl Board {
+    fn reconcile(&mut self) {
+        loop {
+            let updates: Vec<_> = self.todos.iter().filter_map(|todo| {
+                let children: Vec<_> = self.todos.iter().filter(|child| child.parent_id.as_deref() == Some(todo.id.as_str())).collect();
+                if children.is_empty() { return None; }
+                let completed = children.iter().all(|child| child.completed);
+                (todo.completed != completed).then_some((todo.id.clone(), completed))
+            }).collect();
+            if updates.is_empty() { break; }
+            for (id, completed) in updates { self.todos.iter_mut().find(|todo| todo.id == id).unwrap().completed = completed; }
+        }
+    }
+
+    fn normalize(&mut self) {
+        let ids: HashSet<_> = self.todos.iter().map(|todo| todo.id.clone()).collect();
+        for todo in &mut self.todos {
+            if todo.parent_id.as_ref().is_some_and(|id| id == &todo.id || !ids.contains(id)) { todo.parent_id = None; }
+        }
+        for index in 0..self.todos.len() {
+            let mut seen = HashSet::new();
+            let mut current = index;
+            while let Some(parent_id) = self.todos[current].parent_id.clone() {
+                seen.insert(self.todos[current].id.clone());
+                if seen.contains(&parent_id) { self.todos[current].parent_id = None; break; }
+                current = self.todos.iter().position(|todo| todo.id == parent_id).unwrap();
+            }
+        }
+        self.reconcile();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +114,12 @@ struct Workspace {
     active_list_id: String,
 }
 
+impl Workspace {
+    fn normalize(&mut self) {
+        for list in &mut self.lists { list.board.normalize(); }
+    }
+}
+
 fn data_file<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, String> {
     let directory = app.path().app_data_dir().map_err(|error| error.to_string())?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
@@ -96,14 +134,17 @@ fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Option<Workspace>, String
     if !path.exists() { return Ok(None); }
     let contents = fs::read(path).map_err(|error| error.to_string())?;
     let contents = if vault::is_encrypted(&contents)? { vault::open(vault.key.as_ref().ok_or("Vault locked")?, &contents)? } else { contents };
-    serde_json::from_slice(&contents).map(Some).map_err(|error| error.to_string())
+    let mut workspace: Workspace = serde_json::from_slice(&contents).map_err(|error| error.to_string())?;
+    workspace.normalize();
+    Ok(Some(workspace))
 }
 
 #[tauri::command]
-fn save_board<R: Runtime>(app: AppHandle<R>, board: Workspace) -> Result<(), String> {
+fn save_board<R: Runtime>(app: AppHandle<R>, mut board: Workspace) -> Result<(), String> {
     let state = app.state::<VaultRuntime>();
     let vault = state.0.lock().map_err(|e| e.to_string())?;
     let path = data_file(&app)?;
+    board.normalize();
     let contents = serde_json::to_vec(&board).map_err(|error| error.to_string())?;
     let encrypted = if path.exists() { vault::is_encrypted(&fs::read(&path).map_err(|e| e.to_string())?)? } else { vault.key.is_some() };
     let contents = if encrypted || vault.key.is_some() { vault::seal(vault.key.as_ref().ok_or("Vault locked")?, &contents)? } else { contents };

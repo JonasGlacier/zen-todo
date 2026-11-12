@@ -1,8 +1,8 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import {
-  NOTE_COLORS, addList, addSibling, addTodo, archiveList, canMove, createWorkspace, deleteList, ensureColors, indentTodo, isBlocked,
-  isNoteColor, moveTodo, normalize, outdentTodo, prerequisites, reconcile, removeTodo, restoreList, setListColor, toggleTodo,
+  NOTE_COLORS, addList, addSibling, addTodo, archiveList, canMove, createWorkspace, deleteList, ensureColors, indentTodo,
+  isNoteColor, moveTodo, normalize, orderedTodos, outdentTodo, subtasks, reconcile, removeTodo, restoreList, setListColor, toggleTodo,
 } from "./board";
 import type { Board, DropPlace, NoteColor, Todo, TodoList, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
@@ -52,14 +52,10 @@ async function persist() {
 function change(mutate: () => void, focus?: string, renderAfter = true): Promise<void> {
   const operation = pendingChange.then(async () => {
     const previous = structuredClone(workspace);
-    const previousBoard = structuredClone(board);
     try {
       message = "";
       mutate();
       reconcile(board);
-      const reset = previousBoard.todos.filter((todo) => todo.completed && board.todos.some((current) =>
-        current.id === todo.id && !current.completed && isBlocked(board, current))).length;
-      if (reset) message = t("resetTasks", { count: reset });
       await persist();
       if (JSON.stringify(previous) !== JSON.stringify(workspace)) canUndo = false;
     } catch (error) {
@@ -87,23 +83,32 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
 }
 
 function todoRow(todo: Todo): string {
-  const blocked = isBlocked(board, todo);
+  const children = subtasks(board, todo.id);
+  const partial = !todo.completed && orderedTodos(board, todo.id).some((child) => child.completed);
   const label = escapeHtml(todo.title);
-  return `<div class="todo ${todo.completed ? "is-completed" : ""} ${blocked ? "is-blocked" : ""}" data-todo="${todo.id}">
+  return `<div class="todo ${todo.completed ? "is-completed" : ""}" data-todo="${todo.id}">
     <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
-    <button class="check ${todo.completed ? "checked" : ""}" data-action="toggle" data-id="${todo.id}"
-      ${blocked ? "disabled" : ""} aria-pressed="${todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
-      title="${blocked ? t("prerequisitesFirst") : ""}">${todo.completed ? icon("check") : ""}</button>
+    <button class="check ${todo.completed ? "checked" : ""} ${partial ? "is-partial" : ""}" data-action="toggle" data-id="${todo.id}"
+      role="checkbox" aria-checked="${partial ? "mixed" : todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
+      title="${children.length ? t("toggleSubtasks") : ""}">${todo.completed ? icon("check") : partial ? icon("hide") : ""}</button>
     <textarea class="todo-title" id="${editorId(todo.id)}" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" placeholder="${t("todoPlaceholder")}" rows="1" maxlength="200" spellcheck="false">${label}</textarea>
-    <button class="row-action" data-action="add-previous" data-id="${todo.id}" title="${t("addPrevious")}" aria-label="${escapeHtml(t("addPreviousNamed", { title: todo.title }))}">${icon("previous")}</button>
+    ${children.length ? `<span class="task-progress" aria-label="${t("subtaskProgress", { done: children.filter((child) => child.completed).length, total: children.length })}">${children.filter((child) => child.completed).length}/${children.length}</span>` : ""}
+    <button class="row-action" data-action="add-subtask" data-id="${todo.id}" title="${t("addSubtask")}" aria-label="${escapeHtml(t("addSubtaskNamed", { title: todo.title }))}">${icon("subtask")}</button>
     <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
   </div>`;
 }
 
-// Previous steps are drawn indented above the task they lead to.
+// Parents appear first, followed by their indented subtasks.
 function nodeTemplate(todo: Todo): string {
-  const previous = prerequisites(board, todo.id);
-  return `<div class="node" id="node-${todo.id}">${previous.length ? `<div class="children">${previous.map(nodeTemplate).join("")}</div>` : ""}${todoRow(todo)}</div>`;
+  const children = subtasks(board, todo.id);
+  return `<div class="node" id="node-${todo.id}">${todoRow(todo)}${children.length ? `<div class="children">${children.map(nodeTemplate).join("")}</div>` : ""}</div>`;
+}
+
+function archivedNodes(archivedBoard: Board, parentId: string | null = null): string {
+  return archivedBoard.todos.filter((todo) => todo.parentId === parentId).map((todo) => {
+    const children = archivedNodes(archivedBoard, todo.id);
+    return `<li><span class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</span>${children ? `<ul>${children}</ul>` : ""}</li>`;
+  }).join("");
 }
 
 function archiveTemplate(): string {
@@ -112,7 +117,7 @@ function archiveTemplate(): string {
     const done = list.board.todos.filter((todo) => todo.completed).length;
     const name = escapeHtml(list.title);
     const tasks = list.board.todos.length
-      ? list.board.todos.map((todo) => `<li class="${todo.completed ? "is-completed" : ""}">${escapeHtml(todo.title) || "&nbsp;"}</li>`).join("")
+      ? archivedNodes(list.board)
       : `<li class="muted">${t("emptyArchivedList")}</li>`;
     return `<section class="archived-list" data-color="${colorOf(list)}">
       <div class="archived-header"><div class="archived-info"><span class="archived-name" title="${name}">${name}</span><span class="archived-meta">${t("archivedProgress", { done, total: list.board.todos.length })}</span></div>
@@ -134,11 +139,10 @@ function render() {
   const visibleLists = workspace.lists.filter((item) => !item.archived);
   const archivedCount = workspace.lists.length - visibleLists.length;
   const pending = board.todos.filter((todo) => !todo.completed);
-  const available = pending.filter((todo) => !isBlocked(board, todo)).length;
   const completed = board.todos.length - pending.length;
-  const roots = board.todos.filter((todo) => todo.nextId === null);
+  const roots = board.todos.filter((todo) => todo.parentId === null);
   const color = colorOf(list);
-  const status = pending.length ? `${t("readyCount", { count: available })}${pending.length > available ? ` · ${t("waitingCount", { count: pending.length - available })}` : ""}` : t(completed ? "allDone" : "takeYourTime");
+  const status = pending.length ? t("taskProgress", { done: completed, total: board.todos.length }) : t(completed ? "allDone" : "takeYourTime");
   const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
   const content = showArchive ? archiveTemplate() : `<article class="note" data-color="${color}">
       <header class="note-header" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${status}</span></div>
@@ -347,7 +351,7 @@ async function suspendToTray() {
 
 function handleAction(button: HTMLButtonElement) {
   const { action, id = "" } = button.dataset;
-  if (action === "add-previous") {
+  if (action === "add-subtask") {
     const newId = crypto.randomUUID();
     void change(() => { addTodo(board, "", id, newId); }, editorId(newId));
     return;
@@ -362,8 +366,7 @@ function handleAction(button: HTMLButtonElement) {
   }
   void change(() => {
     if (action === "toggle") {
-      const reset = toggleTodo(board, id);
-      if (reset) message = t("resetTasks", { count: reset });
+      toggleTodo(board, id);
     } else if (action === "delete-task") {
       removeTodo(board, id);
     } else if (action === "archive-list") {
@@ -583,7 +586,7 @@ function bindEvents() {
         const row = input.closest(".todo")!;
         row.querySelector(".check")?.setAttribute("aria-label", t("taskLabel", { action: t(saved.completed ? "undoComplete" : "complete"), title: saved.title }));
         row.querySelector(".delete")?.setAttribute("aria-label", t("deleteNamedTodo", { title: saved.title }));
-        row.querySelector(".row-action")?.setAttribute("aria-label", t("addPreviousNamed", { title: saved.title }));
+        row.querySelector(".row-action")?.setAttribute("aria-label", t("addSubtaskNamed", { title: saved.title }));
         resizeTodo(input);
       });
     });
@@ -681,14 +684,15 @@ async function start() {
   const session = isTauri() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
   if (!workspace.lists.length) throw new Error("Invalid workspace");
-  for (const list of workspace.lists) normalize(list.board);
+  let normalized = false;
+  for (const list of workspace.lists) normalized = normalize(list.board) || normalized;
   if (!workspace.lists.some((list) => !list.archived)) addList(workspace, t("myTodos"));
   const recolored = ensureColors(workspace);
   if (!workspace.lists.some((list) => list.id === workspace.activeListId && !list.archived)) {
     workspace.activeListId = workspace.lists.find((list) => !list.archived)!.id;
   }
   board = activeList().board;
-  if (!stored || recolored) await persist().catch(console.error);
+  if (!stored || recolored || normalized) await persist().catch(console.error);
   if (isTauri()) {
     const state = await invoke<AgentResult>("agent_execute", { request: { command: "list" } });
     canUndo = state.canUndo;

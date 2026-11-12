@@ -2,21 +2,21 @@
 
 **English** · [简体中文](#简体中文)
 
-A lightweight floating todo app for Windows 10 and 11, built with Tauri 2, Rust, TypeScript, HTML and CSS.
+A lightweight floating todo app with nested subtasks for Windows 10 and 11, built with Tauri 2, Rust, TypeScript, HTML and CSS.
 
-<img src="screenshot.png" alt="Zen Todo showing tasks and their dependencies" width="380">
+<img src="screenshot.png" alt="Zen Todo with nested tasks and subtasks" width="380">
 
 *App preview with example tasks.*
 
 ## Features
 
 - Keep multiple independent lists; archive them for later viewing and restoration, or hold the delete button for 1.5 seconds to delete a list.
-- Tasks are plain, Notion-style rows. Each task can have several previous steps but only one next step, so dependencies form a tree that converges. Previous steps are indented above the task they lead to; a task can be completed only after all its previous steps are done, and reopening one reopens the tasks after it.
-- Edit in place: Enter adds a task, Tab/Shift+Tab nests or lifts it, and drag the handle to reorder or drop onto another task to make it that task's previous step.
+- Organize tasks into nested subtasks. Parents appear above their indented children; each task can have its own subtasks. Check a parent to complete its whole subtree, or finish its subtasks individually and the parent completes automatically. Unchecking a child reopens its ancestors.
+- Edit in place: Enter adds a sibling, Tab nests under the previous sibling, Shift+Tab lifts a task one level. Drag to reorder or drop onto another task to make it a subtask. Deleting a parent preserves and promotes its children.
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
 - Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
 - Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
-- Use the ✨ button or Ctrl+K to create/edit lists with AI, with one-step undo. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
+- Use the ✨ button or Ctrl+K to create/edit lists with AI, with one-step undo. AI first lists tasks, then breaks suitable tasks down into concrete subtasks. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
 - External Agents can use the bundled `zen-todo-cli.exe` to read lists, submit changes, and undo, including while the app is hidden in the tray. See [AI and CLI usage](docs/ai-and-cli.md).
 
 ## Privacy and storage
@@ -32,7 +32,7 @@ Requirements: Node.js 22.18 or later, Rust stable, and the Windows WebView2 Runt
 ```bash
 npm install
 npm run dev          # browser development preview
-npm test             # task-dependency tests
+npm test             # nested task and list tests
 npm run build        # frontend build
 cargo test --manifest-path src-tauri/Cargo.toml # Rust action, AI HTTP and encryption tests
 cargo build --manifest-path src-tauri/Cargo.toml --bin zen-todo-cli # development CLI
@@ -48,20 +48,19 @@ The Windows installer builds and installs the console CLI next to the GUI execut
 
 ## 简体中文
 
-一个面向 Windows 10/11 的轻量悬浮待办应用。使用 Tauri 2、Rust 和原生 HTML/CSS/TypeScript 构建。
+一个面向 Windows 10/11、可以嵌套子任务的轻量悬浮待办清单应用。使用 Tauri 2、Rust 和原生 HTML/CSS/TypeScript 构建。
 
 ## 当前功能
 
 - 通过标签页创建、切换、重命名多个独立待办列表；点击顶部列表名称可编辑
 - 可归档清单，在标签栏的归档按钮中查看并恢复；也可长按删除按钮 1.5 秒删除活跃或已归档的清单。归档或删除最后一个活跃列表时自动创建空白列表
-- 待办是类似 Notion 的独立行，不再有分组；点击文字即可编辑，已完成的待办会一直保留
-- 每个待办可以有多个“上一步”，但只有一个“下一步”，整体是逐渐收敛的树；上一步缩进显示在下一步上方
-- 所有上一步完成后，待办才能完成；撤销某个上一步时，自动撤销其后续待办的完成状态
-- 键盘：回车添加同级待办；Tab 设为下一行待办的上一步，Shift+Tab 上移一级；空的新待办按 Backspace 删除；上下方向键在待办间移动
-- 拖动左侧手柄：落在目标上/下边缘为调整顺序（并改为同一个下一步），落在中间则成为目标的上一步；不能形成循环
-- 悬停显示“添加上一步”和删除；删除待办时，其上一步改为连接到它的下一步
-- 所有上一步始终显示在清单中
-- 任务保存到用户数据目录，不依赖数据库；旧数据不做迁移兼容
+- 待办是类似 Notion 的可编辑行，支持多层嵌套子任务；父任务在上，子任务缩进显示在下
+- 勾选父任务会同时完成所有子任务；子任务全部完成后父任务自动完成；取消子任务会同步取消父任务及其祖先的完成状态
+- 键盘：回车添加同级待办；Tab 设为前一个同级任务的子任务，Shift+Tab 提升一级并放到原父任务之后；空的新待办按 Backspace 删除；上下方向键在待办间移动
+- 拖动左侧手柄：落在目标上/下边缘为调整同级顺序，落在中间则成为目标的子任务；拖动父任务会带上整棵子任务树，不能拖入自己的后代
+- 悬停显示“添加子任务”和删除；删除父任务会保留子任务，并提升到父任务原来的位置
+- 子任务始终显示，父任务旁显示直接子任务的完成进度
+- 任务保存到用户数据目录，不依赖数据库；旧版保存的层级会自动作为父子关系读取，保留任务 ID、标题和创建时间，后续保存使用 `parentId`
 - 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
 - 顶部齿轮打开独立设置窗口，可切换简体中文 / English
 - 桌面版可在设置中启用独立密码加密，并选择隐藏到托盘时是否锁定
@@ -76,11 +75,13 @@ The Windows installer builds and installs the console CLI next to the GUI execut
 
 点击右上角齿轮打开独立设置窗口，默认尺寸为 640×480，最小尺寸为 480×360，可通过窗口顶部空白区域拖动。窗口采用左侧分类、右侧设置内容的布局。重复点击齿轮会激活已有设置窗口；关闭设置窗口不会退出应用，也不影响主窗口使用。
 
-在“通用 → 语言”中选择简体中文或 English，设置即时保存。语言偏好单独保存在 WebView / 浏览器的 `zen-todo-settings` 中，下次打开自动恢复。跨窗口通过 storage 事件与 Tauri 事件同步，切换语言不会修改已有列表名称、组名和待办内容，也不会丢失主窗口中正在编辑的草稿。
+在“通用 → 语言”中选择简体中文或 English，设置即时保存。语言偏好单独保存在 WebView / 浏览器的 `zen-todo-settings` 中，下次打开自动恢复。跨窗口通过 storage 事件与 Tauri 事件同步，切换语言不会修改已有列表名称和待办内容，也不会丢失主窗口中正在编辑的草稿。
 
 普通浏览器开发模式下，设置会打开到独立的命名弹出窗口；也可以直接访问 `/?view=settings` 预览设置页面。
 
 ### AI 配置
+
+内置 AI 和“复制提示词给你的 Agent”使用相同的清单规划原则：**先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。** 例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”。具体、简单的条目不必继续拆分。AI/CLI 推荐使用 `children` 嵌套数组表达层级，无需构造执行先后关系。
 
 在“AI”分类选择服务预设，填写 Base URL、模型名称和 API Key，然后保存。Ollama 需先在本机安装并下载对应模型，例如 `ollama pull qwen2.5:7b`，通常无需 API Key。服务商预设只是可编辑示例，不保证模型持续可用或免费；请以服务商的实际额度和定价为准。
 
@@ -121,7 +122,7 @@ npm install
 npm run dev
 ```
 
-运行依赖规则测试及前端构建：
+运行任务层级规则测试及前端构建：
 
 ```bash
 npm test

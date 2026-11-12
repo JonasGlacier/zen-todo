@@ -1,7 +1,7 @@
 [package]
 name = "zen-todo"
 version = "0.1.0"
-description = "A lightweight floating todo list for Windows"
+description = "A lightweight floating todo list with nested subtasks for Windows"
 authors = ["Zen Todo"]
 edition = "2021"
 default-run = "zen-todo"

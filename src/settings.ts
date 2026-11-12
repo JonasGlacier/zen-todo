@@ -30,7 +30,7 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ "&": "
 document.body.classList.add("settings-window");
 
 function aiPage(): string {
-  return `<section class="settings-section"><h2>${t("ai")}</h2><p class="section-description">${t("aiDescription")}</p>
+  return `<section class="settings-section"><h2>${t("ai")}</h2><p class="section-description">${t("aiDescription")} ${t("aiPlanningHint")}</p>
     <div class="settings-card agent-setup"><div class="setting-label">${icon("ai")}<span>${t("agentSetup")}</span></div><p class="setting-description">${t("agentCopyHint")}</p><button class="settings-action" id="copy-agent-prompt" ${copyingAgentPrompt || !isTauri() ? "disabled" : ""}>${t(copyingAgentPrompt ? "agentCopying" : "agentCopyPrompt")}</button><p class="${agentCopyError ? "settings-error" : "settings-success"}" role="status">${escapeHtml(agentCopyStatus)}</p></div>
     ${isTauri() ? `<form id="ai-settings-form" class="settings-card ai-settings-form"><fieldset ${saving || !aiLoaded ? "disabled" : ""}>
     <label>${t("aiPreset")}<select id="ai-preset">${Object.keys(AI_PRESETS).map((key) => `<option value="${key}" ${aiPreset === key ? "selected" : ""}>${key === "custom" ? t("aiCustom") : { ollama: "Ollama (local)", bigmodel: "BigModel", siliconflow: "SiliconFlow", openai: "OpenAI" }[key]}</option>`).join("")}</select></label>
