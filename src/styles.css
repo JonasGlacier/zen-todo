@@ -220,25 +220,22 @@ body:has(#mobile-edit-bar:not([hidden])) .ai-island:not(.is-open) { bottom: calc
   .tab-action { flex: 0 0 32px; width: 32px; }
   .ai-panel textarea { font-size: 14px; }
   .ai-controls button { padding: 7px 12px; font-size: 12px; }
-  .mobile-edit-bar {
-    display: flex;
-    justify-content: space-around;
-    align-items: center;
-    gap: 4px;
-    margin-top: 6px;
-    padding: 5px 6px;
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    background: var(--surface);
-  }
-  .mobile-edit-bar button {
-    display: grid;
-    flex: 1;
-    height: 32px;
-    place-items: center;
-    border-radius: 4px;
-    color: var(--ink);
-  }
-  .mobile-edit-bar button:active { background: var(--hover); }
-  .mobile-edit-bar .mobile-edit-danger { color: var(--danger); }
 }
+
+/* Float above the IME, without consuming any space in .shell's flex layout.
+   Android also shows this with an attached mouse/keyboard (fine pointer). */
+@media (pointer: coarse) {
+  .mobile-edit-bar { display: flex; }
+}
+[data-platform="android"] .mobile-edit-bar { display: flex; }
+.mobile-edit-bar {
+  position: fixed; z-index: 40; top: 0; left: 50%;
+  width: min(360px, calc(100% - 24px)); transform: translateX(-50%);
+  justify-content: space-around; align-items: center; gap: 4px;
+  margin: 0; padding: 5px 6px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, .16);
+}
+.mobile-edit-bar button { display: grid; flex: 1; min-width: 0; height: 44px; place-items: center; border-radius: 6px; color: var(--ink); touch-action: manipulation; }
+.mobile-edit-bar button:active { background: var(--hover); }
+.mobile-edit-bar .mobile-edit-danger { color: var(--danger); }

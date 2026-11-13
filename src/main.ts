@@ -5,7 +5,7 @@ import {
   isNoteColor, moveTodo, normalize, orderedTodos, outdentTodo, subtasks, reconcile, removeTodo, restoreList, setListColor, toggleTodo,
 } from "./board";
 import type { Board, DropPlace, NoteColor, Todo, TodoList, Workspace } from "./board";
-import { getLanguage, t, watchSettings } from "./i18n";
+import { getLanguage, getUiScale, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
 import { createAiIsland } from "./ai-island";
 import { captureEditors, editorsAfterSync, restoreEditors } from "./session";
@@ -149,7 +149,40 @@ function updateMobileToolbarVisibility() {
   const active = document.activeElement;
   focusedTodoId = active instanceof HTMLTextAreaElement && active.dataset.editTodo ? active.dataset.editTodo : null;
   bar.hidden = !focusedTodoId || showArchive;
+  updateMobileToolbarPosition();
 }
+
+function updateMobileToolbarPosition() {
+  const bar = document.querySelector<HTMLElement>("#mobile-edit-bar");
+  if (!bar || bar.hidden) return;
+  const view = window.visualViewport;
+  const bottom = view ? view.offsetTop + view.height : window.innerHeight;
+  const width = view?.width ?? window.innerWidth;
+  const left = view?.offsetLeft ?? 0;
+  // Coordinates from VisualViewport are rendered pixels; CSS zoom scales the
+  // toolbar too. Anchor its bottom to the *visible* viewport, not the layout
+  // viewport that can extend behind Android's IME in edge-to-edge mode.
+  const zoom = getUiScale() / 100;
+  bar.style.width = `${Math.min(360, (width - 24) / zoom)}px`;
+  bar.style.left = `${(left + width / 2) / zoom}px`;
+  bar.style.top = `${Math.max(0, bottom / zoom - bar.offsetHeight - 8)}px`;
+
+  const active = document.activeElement;
+  const list = document.querySelector<HTMLElement>(".list");
+  if (active instanceof HTMLTextAreaElement && active.dataset.editTodo && list) {
+    const overlap = active.getBoundingClientRect().bottom - bar.getBoundingClientRect().top + 8;
+    if (overlap > 0) list.scrollTop += overlap / zoom;
+  }
+}
+
+let toolbarPositionFrame = 0;
+function scheduleMobileToolbarPosition() {
+  cancelAnimationFrame(toolbarPositionFrame);
+  toolbarPositionFrame = requestAnimationFrame(updateMobileToolbarPosition);
+}
+window.visualViewport?.addEventListener("resize", scheduleMobileToolbarPosition);
+window.visualViewport?.addEventListener("scroll", scheduleMobileToolbarPosition);
+window.addEventListener("resize", scheduleMobileToolbarPosition);
 
 function render() {
   document.documentElement.lang = getLanguage();
