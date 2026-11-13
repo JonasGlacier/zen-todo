@@ -1,15 +1,16 @@
 {
-  "name": "zen-todo",
+  "name": "onebyone",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:cli": "cargo build --manifest-path src-tauri/Cargo.toml --release --bin zen-todo-cli",
+    "build:cli": "cargo build --manifest-path src-tauri/Cargo.toml --release --bin onebyone-cli",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:android": "tauri android"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",

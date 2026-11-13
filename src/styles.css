@@ -29,13 +29,16 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .muted { color: var(--text-3); }
 
 /* Window frame */
-.shell { position: relative; display: flex; height: 100%; flex-direction: column; padding: 0 10px 8px; }
-.titlebar { display: flex; flex: 0 0 34px; align-items: center; gap: 4px; margin: 0 -10px; padding: 0 8px 0 10px; }
+.shell { position: relative; display: flex; height: 100%; flex-direction: column; padding: env(safe-area-inset-top, 0px) 10px max(8px, env(safe-area-inset-bottom, 0px)); }
+.titlebar { display: flex; flex: 0 0 34px; align-items: center; gap: 4px; margin: 0 -10px; padding: 0 8px 0 12px; }
+.mobile-brand { flex: 1; font-size: 13px; font-weight: 600; color: var(--ink); letter-spacing: .01em; }
 .window-drag-region { display: grid; flex: 1; align-self: stretch; place-items: center; padding-left: 81px; cursor: grab; user-select: none; touch-action: none; }
 .window-drag-region span { width: 36px; height: 4px; border-radius: 2px; background: #e2e2e2; pointer-events: none; }
 .window-drag-region:hover span { background: #bdbdbd; }
 .window-drag-region:active { cursor: grabbing; }
 .window-actions { display: flex; flex-shrink: 0; gap: 3px; }
+#undo-button { display: none; }
+[data-platform="android"] #undo-button, [data-platform="ios"] #undo-button { display: grid; }
 .icon-button { display: grid; width: 25px; height: 25px; place-items: center; border-radius: 6px; color: var(--text-3); }
 .icon-button:hover, .icon-button.is-active { background: var(--hover); color: var(--ink); }
 .icon-button svg { width: 16px; height: 16px; }
@@ -44,6 +47,7 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 /* The active list is a sticky note */
 .note { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; padding: 10px 8px 6px 12px; border-radius: 4px; background: var(--note); color: var(--ink); }
 .note-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; padding: 0 2px 8px 0; cursor: grab; }
+[data-platform="android"] .note-header, [data-platform="ios"] .note-header { cursor: default; }
 .note-header input { cursor: text; }
 .note-header button { cursor: pointer; }
 .heading { flex: 1; min-width: 0; }
@@ -64,7 +68,8 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .children { margin-left: 22px; padding-left: 3px; border-left: 1px solid var(--line); }
 .todo { position: relative; display: flex; gap: 5px; min-height: 28px; align-items: center; padding: 2px 1px; border-radius: 3px; }
 .todo:hover { background: var(--hover); }
-.drag-handle { flex: 0 0 12px; margin-right: -2px; color: var(--text-3); cursor: grab; opacity: 0; user-select: none; }
+.drag-handle { display: grid; place-items: center; flex: 0 0 14px; margin-right: -2px; color: var(--text-3); cursor: grab; opacity: 0; user-select: none; touch-action: none; }
+.drag-handle:active { cursor: grabbing; }
 .drag-handle .lucide { width: 12px; height: 15px; }
 .todo:hover .drag-handle { opacity: 1; }
 .check { display: grid; place-items: center; width: 15px; height: 15px; flex: 0 0 auto; padding: 0; border: 1.3px solid var(--check); border-radius: 3px; color: #fff; }
@@ -111,6 +116,10 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .tab-action { display: grid; flex: 0 0 25px; width: 25px; margin-left: 2px; padding: 0; place-items: center; border-radius: 4px; color: var(--text-3); }
 .tab-action:hover, .tab-action.is-active { background: var(--hover); color: var(--ink); }
 
+/* Mobile quick-edit toolbar (hidden on desktop pointer devices) */
+.mobile-edit-bar { display: none; }
+.mobile-edit-bar[hidden] { display: none !important; }
+
 /* Archive */
 .archive-panel { padding-top: 0; }
 .archive-heading { display: flex; align-items: center; gap: 6px; padding: 2px 0 6px; font-size: 11px; }
@@ -155,5 +164,48 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .unlock form button { padding: 7px 8px; border-radius: 4px; background: var(--ink); color: #fff; }
 .unlock form button:hover:not(:disabled) { background: #333; }
 #unlock-error { color: var(--danger); }
+
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
-@media (pointer: coarse) { .drag-handle, .delete, .row-action { opacity: 1; } .todo { min-height: 36px; } }
+
+@media (pointer: coarse) {
+  .titlebar { flex: 0 0 42px; }
+  .icon-button { width: 34px; height: 34px; }
+  .icon-button svg { width: 18px; height: 18px; }
+  .list-name { font-size: 16px; }
+  .status { font-size: 11px; }
+  .swatch { width: 24px; height: 24px; }
+  .todo { min-height: 40px; gap: 7px; padding: 4px 2px; }
+  .drag-handle { flex: 0 0 22px; opacity: 1; }
+  .drag-handle .lucide { width: 15px; height: 18px; }
+  .check { width: 19px; height: 19px; }
+  .check .lucide { width: 13px; height: 13px; }
+  .todo-title { font-size: 14px; line-height: 1.55; }
+  .row-action, .delete { width: 28px; height: 28px; opacity: .85; }
+  .new-task-button { padding: 10px 6px; font-size: 13px; }
+  .tabs-bar { flex: 0 0 36px; gap: 4px; }
+  .tab { padding: 12px 8px; font-size: 12px; }
+  .tab-action { flex: 0 0 32px; width: 32px; }
+  .ai-panel textarea { font-size: 14px; }
+  .ai-controls button { padding: 7px 12px; font-size: 12px; }
+  .mobile-edit-bar {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 5px 6px;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    background: var(--surface);
+  }
+  .mobile-edit-bar button {
+    display: grid;
+    flex: 1;
+    height: 32px;
+    place-items: center;
+    border-radius: 4px;
+    color: var(--ink);
+  }
+  .mobile-edit-bar button:active { background: var(--hover); }
+  .mobile-edit-bar .mobile-edit-danger { color: var(--danger); }
+}

@@ -5,6 +5,8 @@ export type Todo = {
   completed: boolean;
   createdAt: number;
   parentId: string | null;
+  updatedAt?: number;
+  order?: number;
 };
 
 export type Board = { todos: Todo[] };
@@ -14,8 +16,13 @@ export type Board = { todos: Todo[] };
 export const NOTE_COLORS = ["yellow", "orange", "pink", "purple", "blue", "green"] as const;
 export type NoteColor = typeof NOTE_COLORS[number];
 
-export type TodoList = { id: string; title: string; board: Board; archived?: boolean; color?: NoteColor };
-export type Workspace = { lists: TodoList[]; activeListId: string };
+export type TodoList = { id: string; title: string; board: Board; archived?: boolean; color?: NoteColor; updatedAt?: number; order?: number };
+export type Workspace = {
+  lists: TodoList[];
+  activeListId: string;
+  deletedTodos?: Record<string, number>;
+  deletedLists?: Record<string, number>;
+};
 export type DropPlace = "before" | "after" | "into";
 
 const find = (board: Board, id: string | null | undefined) => board.todos.find((todo) => todo.id === id);

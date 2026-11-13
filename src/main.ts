@@ -15,13 +15,15 @@ import type { TextState } from "./history";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
-const browserKey = "zen-todo-board";
+const browserKey = "onebyone-board";
+let platform: "desktop" | "android" | "ios" = /Android/i.test(navigator.userAgent) ? "android" : /iPhone|iPad|iPod/i.test(navigator.userAgent) ? "ios" : "desktop";
 let workspace: Workspace = createWorkspace(t("myTodos"));
 let board: Board = workspace.lists[0].board;
 let pinned = true;
 let pendingChange = Promise.resolve();
 let message = "";
 let draggedId: string | null = null;
+let focusedTodoId: string | null = null;
 let showArchive = false;
 let settingsWindow: Window | null = null;
 let openingSettings = false;
@@ -38,6 +40,7 @@ const textHistories = new WeakMap<HTMLInputElement | HTMLTextAreaElement, TextHi
 let remoteCount = 0;
 let remoteVersion = 0;
 
+const isMobile = () => platform === "android" || platform === "ios";
 const escapeHtml = (value: string) => value.replace(/[&<>'"]/g, (character) => ({
   "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;",
 })[character]!);
@@ -92,7 +95,7 @@ function todoRow(todo: Todo): string {
   const partial = !todo.completed && orderedTodos(board, todo.id).some((child) => child.completed);
   const label = escapeHtml(todo.title);
   return `<div class="todo ${todo.completed ? "is-completed" : ""}" data-todo="${todo.id}">
-    <span class="drag-handle" draggable="true" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
+    <span class="drag-handle" data-drag="${todo.id}" title="${t("reorder")}" aria-hidden="true">${icon("grip")}</span>
     <button class="check ${todo.completed ? "checked" : ""} ${partial ? "is-partial" : ""}" data-action="toggle" data-id="${todo.id}"
       role="checkbox" aria-checked="${partial ? "mixed" : todo.completed}" aria-label="${escapeHtml(t("taskLabel", { action: t(todo.completed ? "undoComplete" : "complete"), title: todo.title }))}"
       title="${children.length ? t("toggleSubtasks") : ""}">${todo.completed ? icon("check") : partial ? icon("hide") : ""}</button>
@@ -137,8 +140,17 @@ function archiveTemplate(): string {
   </div>`;
 }
 
+function updateMobileToolbarVisibility() {
+  const bar = document.querySelector<HTMLElement>("#mobile-edit-bar");
+  if (!bar) return;
+  const active = document.activeElement;
+  focusedTodoId = active instanceof HTMLTextAreaElement && active.dataset.editTodo ? active.dataset.editTodo : null;
+  bar.hidden = !focusedTodoId || showArchive;
+}
+
 function render() {
   document.documentElement.lang = getLanguage();
+  document.documentElement.dataset.platform = platform;
   const listScroll = document.querySelector(".list")?.scrollTop ?? 0;
   const list = activeList();
   const visibleLists = workspace.lists.filter((item) => !item.archived);
@@ -149,6 +161,7 @@ function render() {
   const color = colorOf(list);
   const status = pending.length ? t("taskProgress", { done: completed, total: board.todos.length }) : t(completed ? "allDone" : "takeYourTime");
   const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
+  const emptyDesc = isMobile() ? t("emptyDescriptionMobile") : t("emptyDescription");
   const content = showArchive ? archiveTemplate() : `<article class="note" data-color="${color}">
       <header class="note-header" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${status}</span></div>
         <button class="icon-button ${aiOpen ? "is-active" : ""}" id="ai-button" title="${t("aiOpen")}" aria-label="${t("aiOpen")}" aria-expanded="${aiOpen}" aria-controls="ai-panel">${icon("ai")}</button>
@@ -156,15 +169,20 @@ function render() {
           <div class="palette" id="palette" role="group" aria-label="${t("noteColor")}" hidden>${swatches}</div></div>
       </header>
       ${aiOpen ? `<form class="ai-panel" id="ai-panel"><label class="sr-only" for="ai-prompt">${t("ai")}</label><textarea id="ai-prompt" rows="2" maxlength="2000" placeholder="${t("aiPlaceholder")}" ${aiBusy ? "readonly" : ""}>${escapeHtml(aiPrompt)}</textarea><div class="ai-controls"><span>${aiBusy ? t("aiThinking") : t("aiSettingsHint")}</span><button type="${aiBusy ? "button" : "submit"}" id="ai-run">${t(aiBusy ? "cancel" : "aiRun")}</button></div></form>` : ""}
-      <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${t("emptyDescription")}</p></div>`}
+      <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${emptyDesc}</p></div>`}
         <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
         <div class="list-actions"><button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
         <button class="delete-list-button" data-delete-list="${list.id}" title="${t("holdDeleteListHint")}">${t("holdDeleteList")}</button></div>
       </div>
     </article>`;
   app.innerHTML = `<section class="shell">
-    <header class="titlebar"><div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>
-      <div class="window-actions"><button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button><button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button></div>
+    <header class="titlebar">
+      ${isMobile() ? `<span class="mobile-brand">OneByOne</span>` : `<div class="window-drag-region" data-window-drag title="${t("dragWindow")}" aria-label="${t("dragWindow")}"><span></span></div>`}
+      <div class="window-actions">
+        <button class="icon-button" id="undo-button" title="${t("undoShortcut")}" aria-label="${t("undo")}">${icon("undo")}</button>
+        <button class="icon-button" id="settings-button" title="${t("settings")}" aria-label="${t("settings")}">${icon("settings")}</button>
+        ${!isMobile() ? `<button class="icon-button ${pinned ? "is-active" : ""}" id="pin-button" title="${t(pinned ? "unpin" : "pin")}" aria-label="${t(pinned ? "unpin" : "pin")}" aria-pressed="${pinned}">${icon(pinned ? "pin" : "pinOff")}</button><button class="icon-button" id="hide-button" title="${t("hide")}" aria-label="${t("hide")}">${icon("hide")}</button>` : ""}
+      </div>
     </header>
     <div class="workspace">
     ${content}
@@ -174,11 +192,19 @@ function render() {
       <button class="tab-action ${showArchive ? "is-active" : ""}" id="archive-toggle" title="${t("archived")}${archivedCount ? ` · ${archivedCount}` : ""}" aria-label="${t("archived")}" aria-pressed="${showArchive}">${icon("archive")}</button>
     </div>
     </div>
+    <div class="mobile-edit-bar" id="mobile-edit-bar" hidden>
+      <button type="button" data-mobile-edit="outdent" title="${t("outdentTask")}" aria-label="${t("outdentTask")}">${icon("outdent")}</button>
+      <button type="button" data-mobile-edit="indent" title="${t("indentTask")}" aria-label="${t("indentTask")}">${icon("indent")}</button>
+      <button type="button" data-mobile-edit="subtask" title="${t("addSubtask")}" aria-label="${t("addSubtask")}">${icon("subtask")}</button>
+      <button type="button" data-mobile-edit="sibling" title="${t("addSiblingTask")}" aria-label="${t("addSiblingTask")}">${icon("sibling")}</button>
+      <button type="button" class="mobile-edit-danger" data-mobile-edit="delete" title="${t("deleteTodo")}" aria-label="${t("deleteTodo")}">${icon("trash")}</button>
+    </div>
     <footer class="footer"><span id="workspace-status" role="status" title="${escapeHtml(message)}">${escapeHtml(message || t("footer", { count: pending.length }))}</span><span>${t("stayFocused")}</span></footer>
   </section>`;
   bindEvents();
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
   document.querySelector(".list")!.scrollTop = listScroll;
+  updateMobileToolbarVisibility();
 }
 
 function refreshStatus() {
@@ -192,10 +218,35 @@ function renderKeepingEditors() {
   const editors = captureEditors();
   render();
   restoreEditors(editors, resizeTodo);
+  updateMobileToolbarVisibility();
 }
 
 function blurEditor() {
   if (document.activeElement instanceof HTMLInputElement || document.activeElement instanceof HTMLTextAreaElement) document.activeElement.blur();
+}
+
+function reloadFromSync() {
+  if (!isTauri() || suspending) return;
+  const operation = pendingChange.then(async () => {
+    try {
+      const stored = await invoke<Workspace | null>("load_board");
+      if (!stored || !stored.lists.length) return;
+      workspace = stored;
+      for (const list of workspace.lists) normalize(list.board);
+      if (!workspace.lists.some((list) => !list.archived)) addList(workspace, t("myTodos"));
+      ensureColors(workspace);
+      if (!workspace.lists.some((list) => list.id === workspace.activeListId && !list.archived)) {
+        workspace.activeListId = workspace.lists.find((list) => !list.archived)!.id;
+      }
+      board = activeList().board;
+      remoteVersion++;
+      message = t("syncUpdatedBanner");
+      renderKeepingEditors();
+    } catch (error) {
+      console.error(error);
+    }
+  });
+  pendingChange = operation.catch(console.error);
 }
 
 // Remote writes use the manual save queue. Rust owns the shared action engine
@@ -312,12 +363,27 @@ async function openSettings() {
   if (openingSettings) return;
   openingSettings = true;
   try {
-    if (isTauri()) await invoke("open_settings", { language: getLanguage() });
-    else if (settingsWindow && !settingsWindow.closed) settingsWindow.focus();
-    else {
+    blurEditor();
+    await pendingChange;
+    if (isTauri()) {
+      const openedWindow = await invoke<boolean>("open_settings", { language: getLanguage() });
+      if (!openedWindow) {
+        const url = new URL(window.location.href);
+        url.searchParams.set("view", "settings");
+        window.location.assign(url.toString());
+        return;
+      }
+    } else if (isMobile()) {
       const url = new URL(window.location.href);
       url.searchParams.set("view", "settings");
-      settingsWindow = window.open(url, "zen-todo-settings", "popup,width=640,height=480,resizable=yes,scrollbars=yes");
+      window.location.assign(url.toString());
+      return;
+    } else if (settingsWindow && !settingsWindow.closed) {
+      settingsWindow.focus();
+    } else {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", "settings");
+      settingsWindow = window.open(url, "onebyone-settings", "popup,width=640,height=480,resizable=yes,scrollbars=yes");
       if (!settingsWindow) throw new Error("Settings popup blocked");
     }
   } catch (error) {
@@ -329,12 +395,11 @@ async function openSettings() {
 
 function refreshLanguage() {
   const operation = pendingChange.then(() => {
-    // Another window can change language while an editor still has focus.
-    // Preserve editor values and the caret across the interface refresh.
     const fields = captureEditors();
     message = "";
     render();
     restoreEditors(fields, resizeTodo);
+    updateMobileToolbarVisibility();
   });
   pendingChange = operation.catch(console.error);
 }
@@ -348,10 +413,11 @@ function restoreSessionEditors(session: UiSession | null) {
   if (session?.version !== 1 || session.listId !== workspace.activeListId) return;
   restoreEditors(session.editors, resizeTodo);
   document.querySelector(".list")!.scrollTop = session.scrollTop;
+  updateMobileToolbarVisibility();
 }
 
 async function suspendToTray() {
-  if (!isTauri() || suspending) return;
+  if (!isTauri() || isMobile() || suspending) return;
   suspending = true;
   aiGeneration++;
   aiBusy = false;
@@ -362,8 +428,6 @@ async function suspendToTray() {
     scrollTop: document.querySelector(".list")?.scrollTop ?? 0,
     editors: captureEditors(),
   } : null;
-  // Capture before blur: it commits existing edits. Never tear down a WebView
-  // while a save is still pending.
   if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
   app.inert = true;
   try {
@@ -414,6 +478,40 @@ function handleAction(button: HTMLButtonElement) {
       draggedId = null;
     }
   });
+}
+
+function handleMobileEditAction(kind: string) {
+  const active = document.activeElement;
+  if (!(active instanceof HTMLTextAreaElement) || !active.dataset.editTodo) return;
+  const id = active.dataset.editTodo;
+  const todo = board.todos.find((item) => item.id === id);
+  if (!todo) return;
+  const title = titleOf(active);
+  const commitCurrent = () => {
+    if (title && title !== todo.title) {
+      const target = board.todos.find((item) => item.id === id);
+      if (target) target.title = title;
+    }
+    textHistories.delete(active);
+  };
+  if (kind === "indent") {
+    if (!title && !todo.title) return;
+    void change(() => { commitCurrent(); indentTodo(board, id); }, editorId(id));
+  } else if (kind === "outdent") {
+    if (!title && !todo.title) return;
+    void change(() => { commitCurrent(); outdentTodo(board, id); }, editorId(id));
+  } else if (kind === "subtask") {
+    if (!title && !todo.title) return;
+    const newId = crypto.randomUUID();
+    void change(() => { commitCurrent(); addTodo(board, "", id, newId); }, editorId(newId));
+  } else if (kind === "sibling") {
+    if (!title && !todo.title) return;
+    const newId = crypto.randomUUID();
+    void change(() => { commitCurrent(); addSibling(board, id, newId); }, editorId(newId));
+  } else if (kind === "delete") {
+    focusSibling(active, -1);
+    void change(() => { removeTodo(board, id); });
+  }
 }
 
 function focusSibling(input: HTMLTextAreaElement, offset: number) {
@@ -467,14 +565,92 @@ function handleTodoKey(input: HTMLTextAreaElement, event: KeyboardEvent) {
   }
 }
 
-function dropPlace(row: HTMLElement, event: DragEvent): DropPlace {
+function dropPlaceByY(row: HTMLElement, clientY: number): DropPlace {
   const { top, height } = row.getBoundingClientRect();
-  const ratio = (event.clientY - top) / height;
+  const ratio = (clientY - top) / Math.max(height, 1);
   return ratio < 0.25 ? "before" : ratio > 0.75 ? "after" : "into";
 }
 
 function clearDropMarks() {
   document.querySelectorAll(".is-dragging, .drop-before, .drop-after, .drop-into").forEach((node) => node.classList.remove("is-dragging", "drop-before", "drop-after", "drop-into"));
+}
+
+function bindPointerDrag() {
+  document.querySelectorAll<HTMLElement>("[data-drag]").forEach((handle) => {
+    let activePointerId: number | null = null;
+    let startY = 0;
+    let started = false;
+    let targetTodoId: string | null = null;
+    let targetPlace: DropPlace | null = null;
+
+    const cleanup = () => {
+      activePointerId = null;
+      started = false;
+      draggedId = null;
+      targetTodoId = null;
+      targetPlace = null;
+      clearDropMarks();
+    };
+
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0 && event.pointerType === "mouse") return;
+      event.preventDefault();
+      event.stopPropagation();
+      activePointerId = event.pointerId;
+      startY = event.clientY;
+      started = false;
+      targetTodoId = null;
+      targetPlace = null;
+      handle.setPointerCapture(event.pointerId);
+    });
+
+    handle.addEventListener("pointermove", (event) => {
+      if (activePointerId !== event.pointerId) return;
+      if (!started) {
+        if (Math.abs(event.clientY - startY) < 4) return;
+        started = true;
+        draggedId = handle.dataset.drag!;
+        blurEditor();
+        handle.closest<HTMLElement>(".todo")?.classList.add("is-dragging");
+      }
+      if (!draggedId) return;
+
+      const listEl = document.querySelector<HTMLElement>(".list");
+      if (listEl) {
+        const rect = listEl.getBoundingClientRect();
+        if (event.clientY < rect.top + 28) listEl.scrollTop -= 8;
+        else if (event.clientY > rect.bottom - 28) listEl.scrollTop += 8;
+      }
+
+      document.querySelectorAll(".drop-before, .drop-after, .drop-into").forEach((el) => el.classList.remove("drop-before", "drop-after", "drop-into"));
+      targetTodoId = null;
+      targetPlace = null;
+
+      const hit = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-todo]");
+      if (!hit) return;
+      const candidateId = hit.dataset.todo!;
+      const place = dropPlaceByY(hit, event.clientY);
+      if (!canMove(board, draggedId, candidateId, place)) return;
+      hit.classList.add(`drop-${place}`);
+      targetTodoId = candidateId;
+      targetPlace = place;
+    });
+
+    handle.addEventListener("pointerup", (event) => {
+      if (activePointerId !== event.pointerId) return;
+      const source = draggedId;
+      const dest = targetTodoId;
+      const place = targetPlace;
+      cleanup();
+      if (source && dest && place) {
+        void change(() => { moveTodo(board, source, dest, place); });
+      }
+    });
+
+    handle.addEventListener("pointercancel", (event) => {
+      if (activePointerId === event.pointerId) cleanup();
+    });
+  });
 }
 
 function setPalette(open: boolean) {
@@ -522,7 +698,17 @@ function bindEvents() {
     if (key.key === "Enter" && !key.shiftKey) { key.preventDefault(); void runAi(); }
     if (key.key === "Escape") { key.stopPropagation(); if (aiBusy) cancelAi(); else toggleAi(); }
   });
+  document.querySelector("#undo-button")?.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    if (!undoText()) void undoWorkspace();
+  });
   document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
+  document.querySelectorAll<HTMLButtonElement>("[data-mobile-edit]").forEach((btn) => {
+    btn.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      handleMobileEditAction(btn.dataset.mobileEdit!);
+    });
+  });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
       const id = tab.dataset.list!;
@@ -619,10 +805,8 @@ function bindEvents() {
       const todo = board.todos.find((item) => item.id === id);
       if (!todo) return;
       const title = titleOf(input);
-      // A brand-new task that was left empty is discarded.
       if (!title && !todo.title) { if (!suppressEmptyCleanup) void change(() => { removeTodo(board, id); }); return; }
       if (!title || title === todo.title) { input.value = todo.title; resizeTodo(input); return; }
-      // Keep the DOM intact so saving on blur doesn't swallow the next click.
       void change(() => { board.todos.find((item) => item.id === id)!.title = title; }, undefined, false).then(() => {
         const saved = board.todos.find((item) => item.id === id);
         if (!saved) return;
@@ -637,7 +821,7 @@ function bindEvents() {
     });
     input.addEventListener("keydown", (event) => handleTodoKey(input, event));
   });
-  document.querySelector("#pin-button")!.addEventListener("click", () => {
+  document.querySelector("#pin-button")?.addEventListener("click", () => {
     const operation = pendingChange.then(async () => {
       try {
         if (isTauri()) await invoke("set_always_on_top", { value: !pinned });
@@ -647,46 +831,17 @@ function bindEvents() {
     });
     pendingChange = operation.catch(console.error);
   });
-  document.querySelector("#hide-button")!.addEventListener("click", () => {
+  document.querySelector("#hide-button")?.addEventListener("click", () => {
     void suspendToTray();
   });
   document.querySelectorAll<HTMLElement>("[data-window-drag]").forEach((region) => {
     region.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0 || (event.target as Element).closest("button, input, textarea, select, a, [contenteditable]")) return;
+      if (isMobile() || event.button !== 0 || (event.target as Element).closest("button, input, textarea, select, a, [contenteditable]")) return;
       event.preventDefault();
       if (isTauri()) void invoke("start_dragging").catch(() => { message = t("dragFailed"); render(); });
     });
   });
-  document.querySelectorAll<HTMLElement>("[data-drag]").forEach((handle) => {
-    handle.addEventListener("dragstart", (event) => {
-      draggedId = handle.dataset.drag!;
-      event.dataTransfer?.setData("text/plain", draggedId);
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
-      const row = handle.closest<HTMLElement>(".todo");
-      row?.classList.add("is-dragging");
-      if (row) event.dataTransfer?.setDragImage(row, 0, 0);
-    });
-    handle.addEventListener("dragend", () => { draggedId = null; clearDropMarks(); });
-  });
-  document.querySelectorAll<HTMLElement>("[data-todo]").forEach((row) => {
-    row.addEventListener("dragover", (event) => {
-      if (!draggedId) return;
-      const place = dropPlace(row, event);
-      row.classList.remove("drop-before", "drop-after", "drop-into");
-      if (!canMove(board, draggedId, row.dataset.todo!, place)) return;
-      event.preventDefault();
-      row.classList.add(`drop-${place}`);
-    });
-    row.addEventListener("dragleave", () => row.classList.remove("drop-before", "drop-after", "drop-into"));
-    row.addEventListener("drop", (event) => {
-      event.preventDefault();
-      const source = draggedId;
-      const place = dropPlace(row, event);
-      draggedId = null;
-      if (!source) return;
-      void change(() => { moveTodo(board, source, row.dataset.todo!, place); });
-    });
-  });
+  bindPointerDrag();
 }
 
 function textEditor(target: EventTarget | null): HTMLInputElement | HTMLTextAreaElement | null {
@@ -701,10 +856,12 @@ function textState(input: HTMLInputElement | HTMLTextAreaElement): TextState {
 document.addEventListener("focusin", (event) => {
   const input = textEditor(event.target);
   if (input) textHistories.set(input, new TextHistory(textState(input)));
+  updateMobileToolbarVisibility();
 });
 document.addEventListener("focusout", (event) => {
   const input = textEditor(event.target);
   if (input) textHistories.delete(input);
+  setTimeout(updateMobileToolbarVisibility, 0);
 });
 document.addEventListener("beforeinput", (event) => {
   const input = textEditor(event.target);
@@ -722,8 +879,6 @@ function undoText(): boolean {
   const input = textEditor(document.activeElement);
   if (!input) return false;
   let previous = textHistories.get(input)?.undo(input.value);
-  // Session-restored drafts and programmatic input can have no local text
-  // stack. Revert that draft before touching workspace operations.
   const saved = input.id === "list-name" ? activeList().title
     : input.dataset.editTodo ? board.todos.find((todo) => todo.id === input.dataset.editTodo)?.title : undefined;
   if (!previous && saved !== undefined && input.value !== saved) {
@@ -754,9 +909,9 @@ document.addEventListener("keydown", (event) => {
 async function unlockIfNeeded() {
   const status = await invoke<{ locked: boolean }>("vault_status");
   if (!status.locked) return;
-  app.innerHTML = `<section class="shell unlock"><div class="unlock-drag" data-window-drag></div><button id="unlock-hide" class="unlock-hide" aria-label="${t("hide")}">−</button><form id="unlock-form"><h1>${t("unlockTitle")}</h1><p>${t("unlockHint")}</p><input id="unlock-password" type="password" autocomplete="current-password" aria-label="${t("password")}" required/><button type="submit">${t("unlock")}</button><p id="unlock-error" role="alert"></p></form></section>`;
-  document.querySelector(".unlock-drag")!.addEventListener("pointerdown", () => { void invoke("start_dragging").catch(console.error); });
-  document.querySelector("#unlock-hide")!.addEventListener("click", () => { void suspendToTray(); });
+  app.innerHTML = `<section class="shell unlock">${!isMobile() ? `<div class="unlock-drag" data-window-drag></div><button id="unlock-hide" class="unlock-hide" aria-label="${t("hide")}">−</button>` : ""}<form id="unlock-form"><h1>${t("unlockTitle")}</h1><p>${t("unlockHint")}</p><input id="unlock-password" type="password" autocomplete="current-password" aria-label="${t("password")}" required/><button type="submit">${t("unlock")}</button><p id="unlock-error" role="alert"></p></form></section>`;
+  document.querySelector(".unlock-drag")?.addEventListener("pointerdown", () => { void invoke("start_dragging").catch(console.error); });
+  document.querySelector("#unlock-hide")?.addEventListener("click", () => { void suspendToTray(); });
   await invoke("main_ready");
   document.querySelector<HTMLInputElement>("#unlock-password")!.focus();
   await new Promise<void>((resolve) => {
@@ -775,12 +930,16 @@ async function unlockIfNeeded() {
 
 async function start() {
   if (isTauri()) {
-    const stopHideListener = await listen("tray-hide-requested", () => { void suspendToTray(); });
-    window.addEventListener("pagehide", stopHideListener, { once: true });
+    platform = await invoke<"desktop" | "android" | "ios">("get_platform").catch(() => "desktop");
+    document.documentElement.dataset.platform = platform;
+    if (!isMobile()) {
+      const stopHideListener = await listen("tray-hide-requested", () => { void suspendToTray(); });
+      window.addEventListener("pagehide", stopHideListener, { once: true });
+    }
   }
   if (isTauri()) await unlockIfNeeded();
   const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
-  const session = isTauri() ? await invoke<UiSession | null>("load_session") : null;
+  const session = isTauri() && !isMobile() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
   if (!workspace.lists.length) throw new Error("Invalid workspace");
   let normalized = false;
@@ -796,7 +955,13 @@ async function start() {
     const stopCliListener = await listen<string>("cli-request", ({ payload }) => {
       void remoteOperation("execute_cli_request", { id: payload, reject: false }, t("aiUpdated"));
     });
-    window.addEventListener("pagehide", stopCliListener, { once: true });
+    const stopSyncListener = await listen("sync-updated", () => {
+      reloadFromSync();
+    });
+    window.addEventListener("pagehide", () => {
+      stopCliListener();
+      stopSyncListener();
+    }, { once: true });
   }
   restoreSession(session);
   const dispose = await watchSettings(refreshLanguage);

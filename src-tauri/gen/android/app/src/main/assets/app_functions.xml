@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appfunctions>
+    <appfunction>
+        <id>com.rossemlab.onebyone/getAgentSchema</id>
+        <enabled_by_default>true</enabled_by_default>
+        <description>Returns OneByOne task planning guidance (how to break tasks into nested children subtasks) and allowed sticky-note colors.</description>
+    </appfunction>
+    <appfunction>
+        <id>com.rossemlab.onebyone/listTaskLists</id>
+        <enabled_by_default>true</enabled_by_default>
+        <description>Reads all todo lists, nested subtasks, list IDs, and the current workspace revision token required before updating a list.</description>
+    </appfunction>
+    <appfunction>
+        <id>com.rossemlab.onebyone/createTaskList</id>
+        <enabled_by_default>true</enabled_by_default>
+        <description>Creates a new todo list with optional sticky-note color and nested subtasks (todosJson array where each item has id, title, optional completed, and optional children array).</description>
+    </appfunction>
+    <appfunction>
+        <id>com.rossemlab.onebyone/updateTaskList</id>
+        <enabled_by_default>true</enabled_by_default>
+        <description>Updates an existing todo list using listId and revision from listTaskLists, submitting the complete nested todosJson tree.</description>
+    </appfunction>
+    <appfunction>
+        <id>com.rossemlab.onebyone/undoLastAction</id>
+        <enabled_by_default>true</enabled_by_default>
+        <description>Reverts the most recent task list modification when OneByOne is active.</description>
+    </appfunction>
+</appfunctions>

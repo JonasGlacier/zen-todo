@@ -20,7 +20,7 @@ struct Envelope { token: String, request: Request }
 pub fn start<R: Runtime>(app: AppHandle<R>) -> Result<(), Box<dyn std::error::Error>> {
     let path = crate::data_file(&app).map_err(std::io::Error::other)?.with_file_name("cli-session.json");
     let lock = OpenOptions::new().read(true).write(true).create(true).truncate(false).open(path.with_extension("lock"))?;
-    lock.try_lock_exclusive().map_err(|_| std::io::Error::other("Zen Todo is already running"))?;
+    lock.try_lock_exclusive().map_err(|_| std::io::Error::other("OneByOne is already running"))?;
     *app.state::<CliRuntime>().lock.lock().unwrap() = Some(lock);
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let token = uuid::Uuid::new_v4().to_string();
@@ -85,33 +85,33 @@ pub fn execute_cli_request<R: Runtime>(app: AppHandle<R>, id: String, reject: bo
 }
 
 fn session_path() -> Result<PathBuf, String> {
-    Ok(dirs::data_dir().ok_or("Cannot locate application data")?.join("com.zentodo.app").join("cli-session.json"))
+    Ok(dirs::data_dir().ok_or("Cannot locate application data")?.join("com.rossemlab.onebyone").join("cli-session.json"))
 }
 
 #[tauri::command]
 pub fn copy_agent_prompt(language: String) -> Result<(), String> {
     let executable = std::env::current_exe().map_err(|e| e.to_string())?;
     let directory = executable.parent().ok_or("Cannot locate the application directory")?;
-    let mut cli = directory.join("zen-todo-cli.exe");
+    let mut cli = directory.join("onebyone-cli.exe");
     // `tauri dev` builds the GUI in debug; the installer build produces a release CLI.
     if cfg!(debug_assertions) && !cli.is_file() && directory.file_name().is_some_and(|name| name == "debug") {
-        cli = directory.parent().ok_or("Cannot locate the build directory")?.join("release/zen-todo-cli.exe");
+        cli = directory.parent().ok_or("Cannot locate the build directory")?.join("release/onebyone-cli.exe");
     }
     if !cli.is_file() {
         return Err(if language == "en" {
-            "zen-todo-cli.exe is missing. Reinstall the app; for development, run npm run build:cli."
+            "onebyone-cli.exe is missing. Reinstall the app; for development, run npm run build:cli."
         } else {
-            "未找到 zen-todo-cli.exe，请重新安装应用；开发环境请先执行 npm run build:cli。"
+            "未找到 onebyone-cli.exe，请重新安装应用；开发环境请先执行 npm run build:cli。"
         }.into());
     }
     let path = cli.to_str().ok_or("CLI path is not valid Unicode")?;
     let quoted = path.replace('\'', "''");
     let prompt = if language == "en" {
         let guidance = agent::PLANNING_GUIDANCE_EN;
-        format!("Please use Zen Todo, a todo list with nested subtasks, to manage my tasks via its CLI.\n\nThe CLI's absolute path on this computer is:\n{path}\n\nStart with schema, then list. PowerShell commands (adapt quoting to your shell):\n& '{quoted}' schema\n& '{quoted}' list\n\n{guidance}\n\nPrefer the nested taskLists view from list. Submit top-level tasks in action.todos and subtasks in children arrays. New tasks need unique temporary IDs. Use apply with a UTF-8 JSON file or stdin. Updates require revision and listId from list. todos and its children are the COMPLETE target list: retain every task that should remain, its existing ID, completion state and nesting. Only expand relevant tasks on edits. Re-read and re-plan on conflict.\n\nundo reverts the latest workspace operation, whether manual, AI or CLI. History keeps at most 20 operations, is cleared whenever the app is hidden to the tray or exits, and is not recorded for hidden-mode changes. Check list.canUndo and list.undoCount before undoing.\n\nKeep Zen Todo running and unlocked; tray mode supports reading and applying changes. Do not edit data or session files directly. No in-app API key or model setup is needed. Read the result with list and summarize the changes. If no task request has been provided yet, ask what I would like to create or change.")
+        format!("Please use OneByOne, a todo list with nested subtasks, to manage my tasks via its CLI.\n\nThe CLI's absolute path on this computer is:\n{path}\n\nStart with schema, then list. PowerShell commands (adapt quoting to your shell):\n& '{quoted}' schema\n& '{quoted}' list\n\n{guidance}\n\nPrefer the nested taskLists view from list. Submit top-level tasks in action.todos and subtasks in children arrays. New tasks need unique temporary IDs. Use apply with a UTF-8 JSON file or stdin. Updates require revision and listId from list. todos and its children are the COMPLETE target list: retain every task that should remain, its existing ID, completion state and nesting. Only expand relevant tasks on edits. Re-read and re-plan on conflict.\n\nundo reverts the latest workspace operation, whether manual, AI or CLI. History keeps at most 20 operations, is cleared whenever the app is hidden to the tray or exits, and is not recorded for hidden-mode changes. Check list.canUndo and list.undoCount before undoing.\n\nKeep OneByOne running and unlocked; tray mode supports reading and applying changes. Do not edit data or session files directly. No in-app API key or model setup is needed. Read the result with list and summarize the changes. If no task request has been provided yet, ask what I would like to create or change.")
     } else {
         let guidance = agent::PLANNING_GUIDANCE_ZH;
-        format!("请通过 CLI 帮我管理 Zen Todo：这是一个可以嵌套子任务的待办清单应用。\n\n本机 CLI 的绝对路径是：\n{path}\n\n先运行 schema，再运行 list。PowerShell 命令如下（使用其他 Shell 时请按对应规则引用路径）：\n& '{quoted}' schema\n& '{quoted}' list\n\n{guidance}\n\n优先阅读 list 返回的嵌套 taskLists 视图。父任务放在 action.todos 中，子任务放在对应父任务的 children 数组中，新任务使用临时唯一 ID。通过 UTF-8 JSON 文件或标准输入执行 apply。更新时附上 list 返回的 revision 和明确的 listId。todos 及其 children 是完整的目标清单，须保留所有希望保留的任务、原始 ID、完成状态及层级。只拆分请求相关任务，遇到冲突先重新读取并重新规划。\n\nundo 撤销最近一次清单操作，可能是手动、AI 或 CLI 修改。历史最多保留20次操作，每次隐藏到托盘或退出时清空，隐藏期间的修改不记录撤销历史。撤销前先检查 list 返回的 canUndo 和 undoCount。\n\nZen Todo 必须保持运行且已解锁，隐藏到托盘时仍可读取和修改。不要直接修改应用的数据文件或会话文件，CLI 操作无需配置应用内模型或 API Key。写入后用 list 检查结果并简短说明修改了什么；如果我还没有给出具体需求，请先询问想创建或调整什么清单。")
+        format!("请通过 CLI 帮我管理 OneByOne：这是一个可以嵌套子任务的待办清单应用。\n\n本机 CLI 的绝对路径是：\n{path}\n\n先运行 schema，再运行 list。PowerShell 命令如下（使用其他 Shell 时请按对应规则引用路径）：\n& '{quoted}' schema\n& '{quoted}' list\n\n{guidance}\n\n优先阅读 list 返回的嵌套 taskLists 视图。父任务放在 action.todos 中，子任务放在对应父任务的 children 数组中，新任务使用临时唯一 ID。通过 UTF-8 JSON 文件或标准输入执行 apply。更新时附上 list 返回的 revision 和明确的 listId。todos 及其 children 是完整的目标清单，须保留所有希望保留的任务、原始 ID、完成状态及层级。只拆分请求相关任务，遇到冲突先重新读取并重新规划。\n\nundo 撤销最近一次清单操作，可能是手动、AI 或 CLI 修改。历史最多保留20次操作，每次隐藏到托盘或退出时清空，隐藏期间的修改不记录撤销历史。撤销前先检查 list 返回的 canUndo 和 undoCount。\n\nOneByOne 必须保持运行且已解锁，隐藏到托盘后仍可读取和修改。不要直接修改应用的数据文件或会话文件，CLI 操作无需配置应用内模型或 API Key。写入后用 list 检查结果并简短说明修改了什么；如果我还没有给出具体需求，请先询问想创建或调整什么清单。")
     };
     arboard::Clipboard::new().map_err(|e| e.to_string())?.set_text(prompt).map_err(|e| e.to_string())
 }
@@ -121,13 +121,13 @@ pub fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let command = args.first().map(String::as_str).unwrap_or("help");
     if command == "help" || command == "--help" {
-        println!("zen-todo-cli list | apply [file.json|-] | undo | schema\nRun Zen Todo first. apply reads a JSON request from a file or stdin. Updates require revision and listId from list.");
+        println!("onebyone-cli list | apply [file.json|-] | undo | schema\nRun OneByOne first. apply reads a JSON request from a file or stdin. Updates require revision and listId from list.");
         return Ok(());
     }
     if command == "schema" {
         println!("{}", serde_json::json!({
             "protocolVersion":2,
-            "description":"Zen Todo is a todo list with nested subtasks. list returns taskLists (nested, recommended for Agents) and workspace (flat internal storage using parentId), plus canUndo and undoCount. apply accepts action.todos as the COMPLETE target tree; omitted tasks and subtasks are removed. Updates require revision from list and action.listId. Put subtasks inside children, recursively. Existing IDs are retained; new temporary IDs are mapped to UUIDs. Titles: list 80, task 200 characters. Maximum 300 tasks INCLUDING subtasks. Parent completion is derived from all children, so set leaf completion states to complete or reopen a subtree. Undo shares a 20-operation history across manual, AI and CLI changes. Hiding to tray clears all history; hidden-mode edits do not record undo history. Locked vaults reject requests.",
+            "description":"OneByOne is a todo list with nested subtasks. list returns taskLists (nested, recommended for Agents) and workspace (flat internal storage using parentId), plus canUndo and undoCount. apply accepts action.todos as the COMPLETE target tree; omitted tasks and subtasks are removed. Updates require revision from list and action.listId. Put subtasks inside children, recursively. Existing IDs are retained; new temporary IDs are mapped to UUIDs. Titles: list 80, task 200 characters. Maximum 300 tasks INCLUDING subtasks. Parent completion is derived from all children, so set leaf completion states to complete or reopen a subtree. Undo shares a 20-operation history across manual, AI and CLI changes. Hiding to tray clears all history; hidden-mode edits do not record undo history. Locked vaults reject requests.",
             "planningGuidance":{"en":agent::PLANNING_GUIDANCE_EN,"zh-CN":agent::PLANNING_GUIDANCE_ZH},
             "createExample":{"command":"apply","action":{"mode":"create","title":"Travel","todos":[{"id":"pack","title":"Pack items for the trip","children":[{"id":"shirts","title":"3 shirts"},{"id":"underwear","title":"5 pairs of underwear"},{"id":"glasses","title":"Sunglasses"},{"id":"brush","title":"Toothbrush"}]}]}},
             "updateExample":{"command":"apply","revision":"COPY_FROM_LIST","action":{"mode":"update","listId":"COPY_FROM_LIST","todos":[{"id":"EXISTING_PARENT_ID","title":"Pack for the trip","children":[{"id":"EXISTING_CHILD_ID","title":"3 shirts","completed":false}]}]}},
@@ -145,14 +145,14 @@ pub fn run() -> Result<(), String> {
         request
     } else if command == "list" || command == "undo" { Request { command: command.into(), action: None, revision: None } }
     else { return Err("Unknown command; use --help".into()); };
-    let session: Session = serde_json::from_slice(&fs::read(session_path()?).map_err(|_| "Start Zen Todo before using the CLI")?).map_err(|_| "Invalid session file; restart Zen Todo")?;
+    let session: Session = serde_json::from_slice(&fs::read(session_path()?).map_err(|_| "Start OneByOne before using the CLI")?).map_err(|_| "Invalid session file; restart OneByOne")?;
     let result = send_request(session, request)?;
     println!("{}", serde_json::to_string_pretty(&result).unwrap());
     Ok(())
 }
 
 fn send_request(session: Session, request: Request) -> Reply {
-    let mut stream = TcpStream::connect_timeout(&format!("127.0.0.1:{}", session.port).parse().unwrap(), Duration::from_secs(3)).map_err(|_| "Cannot connect; start or restart Zen Todo")?;
+    let mut stream = TcpStream::connect_timeout(&format!("127.0.0.1:{}", session.port).parse().unwrap(), Duration::from_secs(3)).map_err(|_| "Cannot connect; start or restart OneByOne")?;
     stream.set_read_timeout(Some(Duration::from_secs(25))).map_err(|e| e.to_string())?;
     stream.set_write_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
     writeln!(stream, "{}", serde_json::to_string(&Envelope { token: session.token, request }).unwrap()).map_err(|e| e.to_string())?;

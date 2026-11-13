@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::{io::Write, path::Path};
 use zeroize::Zeroizing;
 
-const FORMAT: &str = "zen-todo-encrypted";
+const FORMAT: &str = "onebyone-encrypted";
+const LEGACY_FORMAT: &str = "zen-todo-encrypted";
 
 #[derive(Serialize, Deserialize)]
 struct Envelope {
@@ -39,7 +40,7 @@ fn decode<const N: usize>(value: &str) -> Result<[u8; N], String> {
 
 pub fn is_encrypted(data: &[u8]) -> Result<bool, String> {
     let value: serde_json::Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
-    Ok(value.get("format").and_then(|v| v.as_str()) == Some(FORMAT))
+    Ok(matches!(value.get("format").and_then(|v| v.as_str()), Some(FORMAT | LEGACY_FORMAT)))
 }
 
 pub fn create(password: &str) -> Result<Key, String> {
@@ -50,7 +51,7 @@ pub fn create(password: &str) -> Result<Key, String> {
 
 pub fn unlock(data: &[u8], password: &str) -> Result<(Key, Vec<u8>), String> {
     let envelope: Envelope = serde_json::from_slice(data).map_err(|e| e.to_string())?;
-    if envelope.format != FORMAT || envelope.version != 1 || envelope.kdf != "argon2id"
+    if (envelope.format != FORMAT && envelope.format != LEGACY_FORMAT) || envelope.version != 1 || envelope.kdf != "argon2id"
         || (envelope.memory_kib, envelope.iterations, envelope.parallelism) != (19456, 2, 1) {
         return Err("Unsupported encrypted data format".into());
     }

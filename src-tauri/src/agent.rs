@@ -6,6 +6,7 @@ use tauri::{AppHandle, Manager, Runtime};
 
 pub const COLORS: [&str; 6] = ["yellow", "orange", "pink", "purple", "blue", "green"];
 pub const PLANNING_GUIDANCE_EN: &str = "First write a task list. Then consider each task and, where useful, break it down into more specific subtasks. For example, 'Pack items for the trip' can contain '3 shirts', '5 pairs of underwear', 'Sunglasses', and 'Toothbrush'. Keep the main task as the parent and put the detailed items in its children array. Subtasks are parts of a task, not chronological dependencies. Keep simple tasks as leaves; do not force a breakdown or invent quantities if the user's context calls for clarification.";
+#[allow(dead_code)]
 pub const PLANNING_GUIDANCE_ZH: &str = "先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，把“整理旅行需要携带的物品”进一步拆分为“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。保留原任务作为父任务，将详细条目放入它的 children 数组。子任务表示任务包含的内容，不表示执行先后。简单任务不必强行拆分；示例数量不是固定要求，需要更多信息时根据用户需求澄清。";
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -107,15 +108,17 @@ pub fn apply(workspace: &mut Workspace, action: &Action) -> Result<(), String> {
             completed: input.completed.unwrap_or(old.is_some_and(|t| t.completed)),
             created_at: old.map(|t| t.created_at).unwrap_or(now),
             parent_id: input.parent_id.as_ref().map(|id| ids[id].clone()),
+            updated_at: old.map(|t| t.updated_at).unwrap_or(0),
+            order: old.map(|t| t.order).unwrap_or(0),
         });
     }
     let mut board = Board { todos };
     board.reconcile();
     let list = if let Some(existing) = existing {
-        TodoList { id: existing.id.clone(), title: list_title, board, archived: false, color: action.color.clone().or(existing.color.clone()) }
+        TodoList { id: existing.id.clone(), title: list_title, board, archived: false, color: action.color.clone().or(existing.color.clone()), updated_at: existing.updated_at, order: existing.order }
     } else {
         let color = COLORS.iter().min_by_key(|c| workspace.lists.iter().filter(|l| !l.archived && l.color.as_deref() == Some(**c)).count()).unwrap();
-        TodoList { id: uuid::Uuid::new_v4().to_string(), title: list_title, board, archived: false, color: Some(action.color.clone().unwrap_or_else(|| color.to_string())) }
+        TodoList { id: uuid::Uuid::new_v4().to_string(), title: list_title, board, archived: false, color: Some(action.color.clone().unwrap_or_else(|| color.to_string())), updated_at: 0, order: 0 }
     };
     workspace.active_list_id = list.id.clone();
     if let Some(index) = workspace.lists.iter().position(|l| l.id == list.id) { workspace.lists[index] = list; }
@@ -158,6 +161,9 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
     }
     let previous = workspace.clone();
     workspace = prepare(&workspace, &request, &history)?;
+    if request.command != "undo" {
+        crate::sync_merge::stamp_changes(Some(&previous), &mut workspace, crate::sync_merge::now_ms());
+    }
     let data = serde_json::to_vec(&workspace).map_err(|e| e.to_string())?;
     let data = if encrypted { vault::seal(vault_state.key.as_ref().ok_or("Vault is locked")?, &data)? } else { data };
     vault::atomic_write(&path, &data)?;
@@ -172,7 +178,85 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
     })?;
     vault_state.sealed_session = None;
     let status = history.status(&workspace);
+    drop(history);
+    drop(vault_state);
+    crate::sync_lan::notify_local_change(app);
     Ok(serde_json::json!({ "command":request.command, "revision": revision(&workspace), "workspace": workspace, "canUndo": status.can_undo, "undoCount":status.undo_count }))
+}
+
+/// Headless execution directly against `todos.json` when Android's `AppFunctionService`
+/// is invoked by Gemini before the Tauri UI runtime has been started.
+pub fn execute_on_file(path: &std::path::Path, request: Request) -> Result<serde_json::Value, String> {
+    let mut workspace = if path.exists() {
+        let bytes = fs::read(path).map_err(|e| e.to_string())?;
+        if vault::is_encrypted(&bytes)? {
+            return Err("Vault is locked; open OneByOne and unlock your tasks first".into());
+        }
+        let mut ws: Workspace = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        ws.normalize();
+        ws
+    } else {
+        let id = uuid::Uuid::new_v4().to_string();
+        Workspace {
+            lists: vec![TodoList {
+                id: id.clone(),
+                title: "My todos".into(),
+                board: Board::default(),
+                archived: false,
+                color: Some("yellow".into()),
+                updated_at: crate::sync_merge::now_ms(),
+                order: 1000,
+            }],
+            active_list_id: id,
+            deleted_todos: Default::default(),
+            deleted_lists: Default::default(),
+        }
+    };
+
+    if request.command == "list" {
+        let task_lists: Vec<_> = workspace
+            .lists
+            .iter()
+            .map(|list| {
+                serde_json::json!({
+                    "id": list.id,
+                    "title": list.title,
+                    "archived": list.archived,
+                    "todos": nested_todos(&list.board, None)
+                })
+            })
+            .collect();
+        return Ok(serde_json::json!({
+            "protocolVersion": 2,
+            "command": "list",
+            "taskLists": task_lists,
+            "revision": revision(&workspace),
+            "workspace": workspace,
+            "canUndo": false,
+            "undoCount": 0
+        }));
+    }
+
+    if request.command == "undo" {
+        return Err("Nothing to undo in background mode; open OneByOne to use undo history".into());
+    }
+
+    let previous = workspace.clone();
+    let empty_history = crate::history::History::default();
+    workspace = prepare(&workspace, &request, &empty_history)?;
+    crate::sync_merge::stamp_changes(Some(&previous), &mut workspace, crate::sync_merge::now_ms());
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    let data = serde_json::to_vec(&workspace).map_err(|e| e.to_string())?;
+    vault::atomic_write(path, &data)?;
+    Ok(serde_json::json!({
+        "command": request.command,
+        "revision": revision(&workspace),
+        "workspace": workspace,
+        "canUndo": false,
+        "undoCount": 0
+    }))
 }
 
 #[tauri::command]

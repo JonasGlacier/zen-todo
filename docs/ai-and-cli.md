@@ -1,4 +1,4 @@
-# AI and external Agent CLI / AI 与外部 Agent CLI
+# AI, Android App Functions & Desktop CLI / AI、Android 系统 Agent 与桌面 CLI
 
 ## In-app AI / 应用内 AI
 
@@ -9,48 +9,60 @@ Configure an endpoint in **Settings → AI**, save, and optionally test the save
 - `创建一份周末旅行清单。`
 - `把整理行李拆分成具体的物品子任务，保留其他待办。`
 
-Zen Todo is a **todo list with nested subtasks**. Parents appear above their children. AI first writes a task list, then considers each task and breaks it down into more detailed subtasks where useful. For example, “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Simple items do not need forced subdivision.
+OneByOne is a **todo list with nested subtasks**. Parents appear above their children. AI first writes a task list, then considers each task and breaks it down into more detailed subtasks where useful. For example, “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Simple items do not need forced subdivision.
 
-Zen Todo 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
+OneByOne 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
 
-Changes apply immediately. **Ctrl+Z** undoes up to **20 workspace operations** across manual, AI and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history**, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
+Changes apply immediately. **Ctrl+Z** (or the top Undo button on Android) undoes up to **20 workspace operations** across manual, AI, App Functions and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history** on desktop, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
 
-按 **Ctrl+Z** 可连续撤销最近 **20次清单操作**，包括手动编辑、AI 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
+按 **Ctrl+Z**（Android 端可点顶部撤销按钮）可连续撤销最近 **20次清单操作**，包括手动编辑、AI、App Functions 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。桌面端**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
 
-API presets are editable examples, not guarantees of free service or model availability. Small models are worth trying, but task quality and JSON reliability vary. Ollama's default example requires `ollama pull qwen2.5:7b` and a running local Ollama server.
+API presets are editable examples, not guarantees of free service or model availability. Local or LAN Ollama endpoints (e.g., `http://localhost:11434/v1` or `http://192.168.x.x:11434/v1`) are supported across desktop and Android.
 
-## CLI setup / CLI 使用
+## Android 16+ App Functions (Gemini Agent)
+
+On Android 16 (API 36) and later, OneByOne (`com.rossemlab.onebyone`) registers `OneByOneAppFunctionService` with native `BIND_APP_FUNCTION_SERVICE`, exposing:
+
+- `com.rossemlab.onebyone/getAgentSchema`
+- `com.rossemlab.onebyone/listTaskLists`
+- `com.rossemlab.onebyone/createTaskList`
+- `com.rossemlab.onebyone/updateTaskList`
+- `com.rossemlab.onebyone/undoLastAction`
+
+System-level AI Agents (such as Gemini) can directly read and manage nested todo lists whether OneByOne is open or in the background. Locked vaults reject access.
+
+## Desktop CLI setup / 桌面 CLI 使用
 
 **Quick start:** open **Settings → AI → Connect your Agent → Copy instructions for your Agent**, then paste into OpenCode, Claude Code or another terminal-capable Agent. The copied instructions already contain this computer's actual CLI path, shell quoting examples and the workflow. No path editing or in-app model/API key configuration is needed. Instructions follow the interface language. A missing CLI or clipboard failure is shown in Settings instead of reporting success.
 
 **快速开始：**打开 **设置 → AI → 连接你的 Agent → 复制提示词给你的 Agent**，粘贴给 OpenCode、Claude Code 等支持终端的 Agent 即可。提示词自动填写本机实际 CLI 路径，附带带引号的命令示例与操作规则，不需要手改路径，也无需配置应用内模型或 API Key。提示词语言跟随界面语言；CLI 缺失或剪贴板操作失败时会在设置中显示错误。
 
-The Windows installer includes **`zen-todo-cli.exe`** beside the GUI executable. Use its full path or add that directory to your own PATH. It is a separate console executable so Windows shells and Agents receive stdout, stderr and exit codes correctly. Keep Zen Todo running; it may be hidden in the tray. A locked vault rejects data access. The CLI never starts a second GUI or edits `todos.json` directly.
+The Windows installer includes **`onebyone-cli.exe`** beside the GUI executable. Use its full path or add that directory to your own PATH. It is a separate console executable so Windows shells and Agents receive stdout, stderr and exit codes correctly. Keep OneByOne running; it may be hidden in the tray. A locked vault rejects data access. The CLI never starts a second GUI or edits `todos.json` directly.
 
-Windows 安装包会将独立的控制台程序 `zen-todo-cli.exe` 放在应用安装目录。可使用完整路径，或自行将安装目录加入 PATH。应用必须保持运行，可以隐藏到托盘；锁定保险库后，CLI 不能读取或修改数据。
+Windows 安装包会将独立的控制台程序 `onebyone-cli.exe` 放在应用安装目录。可使用完整路径，或自行将安装目录加入 PATH。应用必须保持运行，可以隐藏到托盘；锁定保险库后，CLI 不能读取或修改数据。
 
 Development build / 开发构建：
 
 ```sh
-cargo build --manifest-path src-tauri/Cargo.toml --bin zen-todo-cli
-./src-tauri/target/debug/zen-todo-cli.exe schema
+cargo build --manifest-path src-tauri/Cargo.toml --bin onebyone-cli
+./src-tauri/target/debug/onebyone-cli.exe schema
 ```
 
 Commands / 命令：
 
 ```sh
-zen-todo-cli schema               # protocol and examples, no running app required
-zen-todo-cli list                 # nested taskLists, flat workspace, revision, canUndo, undoCount
-zen-todo-cli apply request.json   # submit UTF-8 JSON from a file
-zen-todo-cli apply -              # submit JSON from stdin
-zen-todo-cli undo                 # undo the latest workspace operation (manual, AI or CLI)
+onebyone-cli schema               # protocol and examples, no running app required
+onebyone-cli list                 # nested taskLists, flat workspace, revision, canUndo, undoCount
+onebyone-cli apply request.json   # submit UTF-8 JSON from a file
+onebyone-cli apply -              # submit JSON from stdin
+onebyone-cli undo                 # undo the latest workspace operation (manual, AI or CLI)
 ```
 
-Success writes JSON to stdout and exits 0. Failure writes a JSON error to stderr and exits 1. `schema` and `--help` work offline without an instance. Requests use an authenticated loopback connection; the current port and random session token are in `%APPDATA%/com.zentodo.app/cli-session.json`. Do not pass that token to the language model. The file is replaced on each app start; a stale file does not mean the app is running.
+Success writes JSON to stdout and exits 0. Failure writes a JSON error to stderr and exits 1. `schema` and `--help` work offline without an instance. Requests use an authenticated loopback connection; the current port and random session token are in `%APPDATA%/com.rossemlab.onebyone/cli-session.json`. Do not pass that token to the language model. The file is replaced on each app start; a stale file does not mean the app is running.
 
 ### Create a list / 新建清单
 
-Save the following as UTF-8 `request.json`, then run `zen-todo-cli apply request.json`:
+Save the following as UTF-8 `request.json`, then run `onebyone-cli apply request.json`:
 
 ```json
 {
@@ -118,6 +130,6 @@ If the workspace changes between `list` and `apply`, the update fails with a con
 
 ### Suggested Agent instruction / 可交给 Agent 的指令
 
-> Use `zen-todo-cli schema`, then `list` and its nested `taskLists` view. First write a task list, then break each task into more detailed subtasks where useful. “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Submit the complete tree using `todos` and `children`, with a unique ID for every task. Updates need revision and listId; retain existing IDs, completion states and tasks outside the request. Re-read and re-plan on conflict. Never edit app data or session files directly.
+> Use `onebyone-cli schema`, then `list` and its nested `taskLists` view. First write a task list, then break each task into more detailed subtasks where useful. “Pack items for the trip” can contain “3 shirts”, “5 pairs of underwear”, “Sunglasses”, and “Toothbrush”. Submit the complete tree using `todos` and `children`, with a unique ID for every task. Updates need revision and listId; retain existing IDs, completion states and tasks outside the request. Re-read and re-plan on conflict. Never edit app data or session files directly.
 
-> 先执行 `zen-todo-cli schema`，再用 `list` 的嵌套 `taskLists` 视图读取清单。先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可拆成“衬衫3件”“内裤5件”“太阳镜”“牙刷”。用 `todos` 和 `children` 提交完整的父子树，每个任务都使用唯一 ID。更新时附上 revision、明确 listId，保留原任务 ID、完成状态和请求范围外的待办。遇到冲突先重新读取并规划，不要直接编辑应用的数据文件或会话文件。
+> 先执行 `onebyone-cli schema`，再用 `list` 的嵌套 `taskLists` 视图读取清单。先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可拆成“衬衫3件”“内裤5件”“太阳镜”“牙刷”。用 `todos` 和 `children` 提交完整的父子树，每个任务都使用唯一 ID。更新时附上 revision、明确 listId，保留原任务 ID、完成状态和请求范围外的待办。遇到冲突先重新读取并规划，不要直接编辑应用的数据文件或会话文件。

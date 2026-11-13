@@ -1,19 +1,19 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Zen Todo",
+  "productName": "OneByOne",
   "version": "0.1.0",
-  "identifier": "com.zentodo.app",
+  "identifier": "com.rossemlab.onebyone",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build && npm run build:cli",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist"
   },
   "app": {
     "windows": [
       {
         "label": "main",
-        "title": "Zen Todo",
+        "title": "OneByOne",
         "width": 340,
         "height": 380,
         "minWidth": 300,
