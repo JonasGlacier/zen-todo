@@ -133,12 +133,9 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .delete-list-button.icon-hold { display: grid; width: 24px; height: 24px; flex-shrink: 0; padding: 0; place-items: center; }
 .delete-list-button.icon-hold .lucide { width: 13px; height: 13px; }
 
-/* Footer and messages */
+/* Compact footer status */
 .footer { display: flex; flex-shrink: 0; justify-content: space-between; align-items: center; min-height: 22px; margin-top: 5px; padding: 0 2px; color: var(--text-3); font-size: 10px; }
-.notice { display: none; flex-shrink: 0; margin-top: 4px; padding: 6px 8px; border-radius: 4px; background: var(--ink); color: #fff; font-size: 10px; line-height: 1.5; }
-.notice.visible { display: block; }
-.notice button { float: right; display: inline-flex; align-items: center; gap: 4px; margin-left: 8px; padding: 0 2px; color: #fff; text-decoration: underline; }
-.notice button .lucide { width: 12px; height: 12px; }
+#workspace-status { flex: 1; min-width: 0; margin-right: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .ai-panel { flex-shrink: 0; margin: 0 0 8px; padding: 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--field); }
 .ai-panel textarea { display: block; width: 100%; max-height: 80px; resize: vertical; border: 0; border-radius: 2px; background: transparent; color: inherit; font-size: 11px; line-height: 1.6; }

@@ -16,7 +16,7 @@ A lightweight floating todo app with nested subtasks for Windows 10 and 11, buil
 - Use a compact, draggable, always-on-top window. Hide it to the system tray and restore it with a click; choose Quit from the tray to exit.
 - Switch between English and Simplified Chinese in Settings. The settings window is borderless and can be dragged from its top edge.
 - Optionally encrypt desktop data with a separate password and choose whether hiding to the tray locks the app.
-- Use Ctrl+Z or the Undo button to undo manual, AI and CLI workspace edits, up to the last **20 operations**. Text editing is undone locally before workspace actions. Navigation does not consume history. Hiding to the tray clears all history; hidden-mode CLI edits do not retain snapshots.
+- Use Ctrl+Z to undo manual, AI and CLI workspace edits, up to the last **20 operations**. Text editing is undone locally before workspace actions. Navigation does not consume history. Hiding to the tray clears all history; hidden-mode CLI edits do not retain snapshots.
 - Use the ✨ button or Ctrl+K to create/edit lists with AI. AI first lists tasks, then breaks suitable tasks down into concrete subtasks. Configure an OpenAI-compatible endpoint or local Ollama under Settings → AI.
 - External Agents can use the bundled `zen-todo-cli.exe` to read lists, submit changes, and undo. Reading and applying changes also work while hidden in the tray. See [AI and CLI usage](docs/ai-and-cli.md).
 
@@ -65,7 +65,7 @@ The Windows installer builds and installs the console CLI next to the GUI execut
 - 无边框小窗口，支持拖动和始终置顶，整条顶部区域可拖动
 - 顶部齿轮打开独立设置窗口，可切换简体中文 / English
 - 桌面版可在设置中启用独立密码加密，并选择隐藏到托盘时是否锁定
-- Ctrl+Z 或“撤销”按钮可连续撤销最近 **20次清单操作**，统一包含手动、AI 和 CLI 修改；输入文字时优先撤销当前文字编辑，切换清单等纯导航不占用历史
+- Ctrl+Z 可连续撤销最近 **20次清单操作**，统一包含手动、AI 和 CLI 修改；输入文字时优先撤销当前文字编辑，切换清单等纯导航不占用历史
 - 成功隐藏到托盘后清空全部历史；隐藏期间的 CLI 修改不保留撤销快照，退出应用也会清空
 - 点击便签头部 ✨ 或按 Ctrl+K，用自然语言创建和编辑清单，结果直接应用
 - 设置 → AI 支持自定义 OpenAI 兼容接口、Ollama 本地模型及可编辑的服务商预设；支持保存配置和测试已保存的连接

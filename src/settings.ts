@@ -20,6 +20,7 @@ let category: "general" | "privacy" | "ai" = "general";
 let aiSettings: AiSettings = { ...AI_PRESETS.ollama, apiKey: "" };
 let aiPreset: keyof typeof AI_PRESETS = "ollama";
 let aiClearKey = false;
+let aiKeySaved: boolean | null = null;
 let aiLoaded = !isTauri();
 let aiStatus = "";
 let aiError = false;
@@ -36,7 +37,7 @@ function aiPage(): string {
     <label>${t("aiPreset")}<select id="ai-preset">${Object.keys(AI_PRESETS).map((key) => `<option value="${key}" ${aiPreset === key ? "selected" : ""}>${key === "custom" ? t("aiCustom") : { ollama: "Ollama (local)", bigmodel: "BigModel", siliconflow: "SiliconFlow", openai: "OpenAI", openrouter: "OpenRouter" }[key]}</option>`).join("")}</select></label>
     <label>${t("aiBaseUrl")}<input id="ai-base-url" type="url" value="${escapeHtml(aiSettings.baseUrl)}" required placeholder="https://example.com/v1" /></label>
     <label>${t("aiModel")}<input id="ai-model" value="${escapeHtml(aiSettings.model)}" required maxlength="200" /></label>
-    <label>${t("aiApiKey")}<input id="ai-api-key" type="password" value="${escapeHtml(aiSettings.apiKey)}" autocomplete="off" /></label><p class="setting-hint">${t("aiKeyHint")}</p>
+    <label>${t("aiApiKey")}<input id="ai-api-key" type="password" value="${escapeHtml(aiSettings.apiKey)}" placeholder="${aiKeySaved ? t("aiKeyReplacePlaceholder") : ""}" autocomplete="off" /></label><p class="setting-hint" role="status">${t(aiKeySaved === null ? "aiKeyUnknown" : aiKeySaved ? "aiKeySaved" : "aiKeyNotSaved")} ${t("aiKeyHint")}</p>
     <label class="setting-checkbox"><input id="ai-clear-key" type="checkbox" ${aiClearKey ? "checked" : ""} /><span>${t("aiClearKey")}</span></label>
     <p class="setting-description">${t("aiPrivacyHint")}</p><div class="password-actions"><button class="settings-action" type="submit">${t("aiSave")}</button><button class="settings-action" type="button" id="ai-test">${t("aiTest")}</button></div>
     </fieldset><p class="${aiError ? "settings-error" : "settings-success"}" role="status">${escapeHtml(aiStatus)}</p></form>` : `<div class="settings-card"><p class="setting-message setting-description">${t("aiDesktopOnly")}</p></div>`}<p class="setting-description">${t("aiCliHint")}</p></section>`;
@@ -160,7 +161,12 @@ async function saveAi() {
     aiClearKey = false;
     aiStatus = t("aiSaved");
   } catch (error) { aiError = true; aiStatus = t("aiSaveFailed", { error: String(error) }); }
-  finally { saving = false; render(); }
+  finally { await refreshAiKeyStatus(); saving = false; render(); }
+}
+
+async function refreshAiKeyStatus() {
+  try { aiKeySaved = await invoke<boolean>("has_ai_api_key"); }
+  catch (error) { aiKeySaved = null; console.error(error); }
 }
 
 async function testAi() {
@@ -246,6 +252,7 @@ void watchSettings(render).then((dispose) => {
   window.addEventListener("pagehide", dispose, { once: true });
   render();
   if (isTauri()) void invoke<typeof vault>("vault_status").then((status) => { vault = status; render(); }).catch((error) => { console.error(error); vaultLoadFailed = true; render(); });
+  if (isTauri()) void refreshAiKeyStatus().then(render);
   if (isTauri()) void invoke<AiSettings>("get_ai_settings").then((settings) => {
     if (settings.baseUrl) {
       aiSettings = settings;

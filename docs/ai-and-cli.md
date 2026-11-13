@@ -13,9 +13,9 @@ Zen Todo is a **todo list with nested subtasks**. Parents appear above their chi
 
 Zen Todo 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
 
-Changes apply immediately. **Ctrl+Z** and the footer **Undo / 撤销** button share up to **20 workspace operations** across manual, AI and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history**, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
+Changes apply immediately. **Ctrl+Z** undoes up to **20 workspace operations** across manual, AI and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history**, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
 
-按 **Ctrl+Z** 或点击“撤销”，可连续撤销最近 **20次清单操作**，包括手动编辑、AI 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
+按 **Ctrl+Z** 可连续撤销最近 **20次清单操作**，包括手动编辑、AI 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
 
 API presets are editable examples, not guarantees of free service or model availability. Small models are worth trying, but task quality and JSON reliability vary. Ollama's default example requires `ollama pull qwen2.5:7b` and a running local Ollama server.
 

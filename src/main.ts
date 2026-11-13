@@ -11,7 +11,7 @@ import { captureEditors, restoreEditors } from "./session";
 import type { UiSession } from "./session";
 import type { AgentResult, AiProposal } from "./ai";
 import { TextHistory, WorkspaceHistory } from "./history";
-import type { HistoryStatus, TextState } from "./history";
+import type { TextState } from "./history";
 import "./styles.css";
 
 const app = document.querySelector<HTMLElement>("#app")!;
@@ -32,8 +32,6 @@ let aiOpen = false;
 let aiPrompt = "";
 let aiBusy = false;
 let aiGeneration = 0;
-let canUndo = false;
-let undoCount = 0;
 let suppressEmptyCleanup = false;
 const browserHistory = new WorkspaceHistory();
 const textHistories = new WeakMap<HTMLInputElement | HTMLTextAreaElement, TextHistory>();
@@ -49,18 +47,12 @@ const colorOf = (list: TodoList): NoteColor => isNoteColor(list.color) ? list.co
 const colorName = (color: NoteColor) => t(`color_${color}`);
 const titleOf = (input: HTMLTextAreaElement) => input.value.replace(/[\r\n]+/g, " ").trim();
 
-function setHistoryStatus(status: HistoryStatus) {
-  canUndo = status.canUndo;
-  undoCount = status.undoCount;
-}
-
 async function persist(recordHistory = false) {
-  if (isTauri()) setHistoryStatus(await invoke<HistoryStatus>("save_board", { board: workspace, recordHistory }));
+  if (isTauri()) await invoke("save_board", { board: workspace, recordHistory });
   else {
     const previous = recordHistory ? JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null : null;
     localStorage.setItem(browserKey, JSON.stringify(workspace));
     if (previous) browserHistory.record(previous, workspace);
-    setHistoryStatus(browserHistory.status(workspace));
   }
 }
 
@@ -82,7 +74,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
     } finally {
       if (renderAfter) render();
       else {
-        refreshNotice();
+        refreshStatus();
       }
       if (focus) {
         const target = document.getElementById(focus);
@@ -182,32 +174,18 @@ function render() {
       <button class="tab-action ${showArchive ? "is-active" : ""}" id="archive-toggle" title="${t("archived")}${archivedCount ? ` · ${archivedCount}` : ""}" aria-label="${t("archived")}" aria-pressed="${showArchive}">${icon("archive")}</button>
     </div>
     </div>
-    <footer class="footer"><span>${t("footer", { count: pending.length })}</span><span>${t("stayFocused")}</span></footer>
-    <div class="notice ${message || canUndo ? "visible" : ""}" role="status">${noticeContent()}</div>
+    <footer class="footer"><span id="workspace-status" role="status" title="${escapeHtml(message)}">${escapeHtml(message || t("footer", { count: pending.length }))}</span><span>${t("stayFocused")}</span></footer>
   </section>`;
   bindEvents();
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
   document.querySelector(".list")!.scrollTop = listScroll;
 }
 
-function noticeContent() {
-  return `<span>${escapeHtml(message)}</span>${canUndo ? `<button id="workspace-undo" title="${t("undoShortcut")}" aria-label="${t("undoAvailable", { count: undoCount })}">${icon("undo")} ${t("undo")} · ${undoCount}</button>` : ""}`;
-}
-
-function bindUndo() {
-  const button = document.querySelector<HTMLButtonElement>("#workspace-undo");
-  // Keep focus until click so committing a title cannot replace this button
-  // between pointerdown and click.
-  button?.addEventListener("pointerdown", (event) => { event.preventDefault(); });
-  button?.addEventListener("click", () => { void undoWorkspace(); });
-}
-
-function refreshNotice() {
-  const notice = document.querySelector<HTMLElement>(".notice");
-  if (!notice) return;
-  notice.innerHTML = noticeContent();
-  notice.classList.toggle("visible", Boolean(message || canUndo));
-  bindUndo();
+function refreshStatus() {
+  const status = document.querySelector<HTMLElement>("#workspace-status");
+  if (!status) return;
+  status.textContent = message || t("footer", { count: board.todos.filter((todo) => !todo.completed).length });
+  status.title = message;
 }
 
 function renderKeepingEditors() {
@@ -247,7 +225,6 @@ function remoteOperation(command: string, args: Record<string, unknown>, success
       } else result = await invoke<AgentResult>(command, args);
       workspace = result.workspace;
       board = activeList().board;
-      setHistoryStatus(result);
       if (result.command !== "list") showArchive = false;
       if (result.command !== "list") remoteVersion++;
       draggedId = null;
@@ -345,9 +322,7 @@ async function openSettings() {
     }
   } catch (error) {
     message = t("openSettingsFailed");
-    const notice = document.querySelector<HTMLElement>(".notice")!;
-    notice.textContent = message;
-    notice.classList.add("visible");
+    refreshStatus();
     console.error(error);
   } finally { openingSettings = false; }
 }
@@ -399,8 +374,6 @@ async function suspendToTray() {
     if (initialized) await persist();
     await invoke("hide_window", { session });
     browserHistory.clear();
-    canUndo = false;
-    undoCount = 0;
   } catch (error) {
     suspending = false;
     app.inert = false;
@@ -410,8 +383,7 @@ async function suspendToTray() {
       restoreSessionEditors(session);
     }
     message = t("hideFailed");
-    const notice = document.querySelector<HTMLElement>(".notice");
-    if (notice) { notice.textContent = message; notice.classList.add("visible"); }
+    refreshStatus();
     console.error(error);
   }
 }
@@ -550,7 +522,6 @@ function bindEvents() {
     if (key.key === "Enter" && !key.shiftKey) { key.preventDefault(); void runAi(); }
     if (key.key === "Escape") { key.stopPropagation(); if (aiBusy) cancelAi(); else toggleAi(); }
   });
-  bindUndo();
   document.querySelector("#settings-button")!.addEventListener("click", () => { void openSettings(); });
   document.querySelectorAll<HTMLButtonElement>("[data-list]").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -822,8 +793,6 @@ async function start() {
   board = activeList().board;
   if (!stored || recolored || normalized) await persist().catch(console.error);
   if (isTauri()) {
-    const state = await invoke<AgentResult>("agent_execute", { request: { command: "list" } });
-    setHistoryStatus(state);
     const stopCliListener = await listen<string>("cli-request", ({ payload }) => {
       void remoteOperation("execute_cli_request", { id: payload, reject: false }, t("aiUpdated"));
     });

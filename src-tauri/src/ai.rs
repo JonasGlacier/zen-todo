@@ -23,6 +23,15 @@ fn credential() -> Result<keyring::Entry, String> {
 }
 
 #[tauri::command]
+pub fn has_ai_api_key() -> Result<bool, String> {
+    match credential()?.get_password() {
+        Ok(key) => Ok(!key.is_empty()),
+        Err(keyring::Error::NoEntry) => Ok(false),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
 pub fn save_ai_settings<R: Runtime>(app: AppHandle<R>, settings: Settings, clear_key: bool) -> Result<(), String> {
     validate(&settings)?;
     if clear_key {
