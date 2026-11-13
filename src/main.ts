@@ -7,6 +7,7 @@ import {
 import type { Board, DropPlace, NoteColor, Todo, TodoList, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
+import { createAiIsland } from "./ai-island";
 import { captureEditors, editorsAfterSync, restoreEditors } from "./session";
 import type { UiSession } from "./session";
 import type { AgentResult, AiProposal } from "./ai";
@@ -34,6 +35,8 @@ let aiOpen = false;
 let aiPrompt = "";
 let aiBusy = false;
 let aiGeneration = 0;
+let aiErrorMessage = "";
+let aiIsland: ReturnType<typeof createAiIsland> | undefined;
 let suppressEmptyCleanup = false;
 const browserHistory = new WorkspaceHistory();
 const textHistories = new WeakMap<HTMLInputElement | HTMLTextAreaElement, TextHistory>();
@@ -163,9 +166,8 @@ function render() {
   const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
   const emptyDesc = isMobile() ? t("emptyDescriptionMobile") : t("emptyDescription");
   const androidAi = platform === "android";
-  const aiPanel = aiOpen ? `<form class="ai-panel ${androidAi ? "ai-floating-input" : ""}" id="ai-panel">
+  const aiPanel = aiOpen && !androidAi ? `<form class="ai-panel" id="ai-panel">
     <label class="sr-only" for="ai-prompt">${t("ai")}</label>
-    ${androidAi ? `<button type="button" class="ai-collapse" id="ai-collapse" aria-label="${t("aiCollapse")}">${icon("close")}</button>` : ""}
     <textarea id="ai-prompt" rows="2" maxlength="2000" placeholder="${t("aiPlaceholder")}" ${aiBusy ? "readonly" : ""}>${escapeHtml(aiPrompt)}</textarea>
     <div class="ai-controls"><span role="status">${aiBusy ? t("aiThinking") : t("aiSettingsHint")}</span><button type="${aiBusy ? "button" : "submit"}" id="ai-run">${t(aiBusy ? "cancel" : "aiRun")}</button></div>
   </form>` : "";
@@ -206,13 +208,24 @@ function render() {
       <button type="button" data-mobile-edit="sibling" title="${t("addSiblingTask")}" aria-label="${t("addSiblingTask")}">${icon("sibling")}</button>
       <button type="button" class="mobile-edit-danger" data-mobile-edit="delete" title="${t("deleteTodo")}" aria-label="${t("deleteTodo")}">${icon("trash")}</button>
     </div>
-    ${androidAi ? `<div class="ai-floating-dock">${aiOpen ? aiPanel : `<button type="button" class="ai-floating-button" id="ai-button" aria-label="${t("aiMobileOpen")}" aria-expanded="false">${icon("ai")}<span>${t("ai")}</span></button>`}</div>` : ""}
     <footer class="footer"><span id="workspace-status" role="status" title="${escapeHtml(message)}">${escapeHtml(message || t("footer", { count: pending.length }))}</span><span>${t("stayFocused")}</span></footer>
   </section>`;
   bindEvents();
   document.querySelectorAll<HTMLTextAreaElement>("[data-edit-todo]").forEach(resizeTodo);
   document.querySelector(".list")!.scrollTop = listScroll;
   updateMobileToolbarVisibility();
+  updateAiIsland();
+}
+
+function updateAiIsland() {
+  if (platform !== "android") return;
+  aiIsland ??= createAiIsland({
+    toggle: toggleAi,
+    input: (value) => { aiPrompt = value; },
+    run: () => { void runAi(); },
+    cancel: cancelAi,
+  });
+  aiIsland.update({ open: aiOpen, busy: aiBusy, prompt: aiPrompt, error: aiErrorMessage });
 }
 
 function refreshStatus() {
@@ -328,6 +341,12 @@ function focusAfterUndo(before: Workspace, previousFocus?: string) {
 }
 
 function toggleAi() {
+  if (platform === "android") {
+    if (aiBusy) cancelAi();
+    aiOpen = !aiOpen;
+    updateAiIsland();
+    return;
+  }
   blurEditor();
   const operation = pendingChange.then(() => {
     aiOpen = !aiOpen;
@@ -347,10 +366,11 @@ function cancelAi() {
 
 async function runAi() {
   if (aiBusy || !aiPrompt.trim()) return;
-  if (!isTauri()) { message = t("aiDesktopOnly"); renderKeepingEditors(); return; }
+  if (!isTauri()) { message = t("aiDesktopOnly"); aiErrorMessage = message; renderKeepingEditors(); return; }
   const failures = saveFailures;
-  blurEditor();
+  if (platform !== "android") blurEditor();
   aiBusy = true;
+  aiErrorMessage = "";
   const generation = ++aiGeneration;
   const prompt = aiPrompt;
   renderKeepingEditors();
@@ -361,8 +381,9 @@ async function runAi() {
     if (generation !== aiGeneration || suspending) return;
     const applied = await remoteOperation("agent_execute", { request: { command: "apply", ...proposal } }, t("aiUpdated"));
     if (applied) { aiOpen = false; aiPrompt = ""; }
+    else aiErrorMessage = message;
   } catch (error) {
-    if (generation === aiGeneration) message = t("aiFailed", { error: String(error) });
+    if (generation === aiGeneration) { message = t("aiFailed", { error: String(error) }); aiErrorMessage = message; }
   } finally {
     if (generation === aiGeneration && !suspending) { aiBusy = false; renderKeepingEditors(); }
   }
@@ -703,10 +724,6 @@ document.addEventListener("pointerdown", (event) => {
 
 function bindEvents() {
   document.querySelector("#ai-button")?.addEventListener("click", toggleAi);
-  document.querySelector("#ai-collapse")?.addEventListener("click", () => {
-    if (aiBusy) cancelAi();
-    toggleAi();
-  });
   document.querySelector<HTMLTextAreaElement>("#ai-prompt")?.addEventListener("input", (event) => { aiPrompt = (event.target as HTMLTextAreaElement).value; });
   document.querySelector("#ai-panel")?.addEventListener("submit", (event) => { event.preventDefault(); void runAi(); });
   document.querySelector("#ai-run")?.addEventListener("click", () => { if (aiBusy) cancelAi(); });

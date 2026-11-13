@@ -1,5 +1,5 @@
 import {
-  Archive, ArchiveRestore, ArrowLeft, Check, ChevronRight, CornerDownRight, GripVertical, Languages,
+  Archive, ArchiveRestore, ArrowLeft, ArrowUp, Check, ChevronRight, CornerDownRight, GripVertical, Languages,
   ListFilter, ListIndentDecrease, ListIndentIncrease, ListPlus, ListTodo, Minus, MonitorSmartphone,
   Palette, Pin, PinOff, Plus, RefreshCw, RotateCcw, Settings, ShieldCheck, SlidersHorizontal,
   Sparkles, Trash2, X, createElement,
@@ -10,7 +10,7 @@ const icons = {
   pin: Pin, pinOff: PinOff, hide: Minus, plus: Plus, close: X, check: Check,
   grip: GripVertical, empty: ListTodo, back: ArrowLeft, trash: Trash2, archive: Archive, restore: ArchiveRestore,
   general: SlidersHorizontal, language: Languages, privacy: ShieldCheck, palette: Palette,
-  ai: Sparkles, undo: RotateCcw, sync: RefreshCw, devices: MonitorSmartphone,
+  ai: Sparkles, send: ArrowUp, undo: RotateCcw, sync: RefreshCw, devices: MonitorSmartphone,
   indent: ListIndentIncrease, outdent: ListIndentDecrease, sibling: CornerDownRight,
 };
 const cache = new Map<keyof typeof icons, string>();
