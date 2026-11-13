@@ -13,6 +13,10 @@ OneByOne is a **todo list with nested subtasks**. Parents appear above their chi
 
 OneByOne 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
 
+When details are missing, AI produces a practical, general-purpose checklist rather than asking follow-up questions or guessing quantities or personal circumstances. For example, use “Enough clothes for the trip” when the trip length is unknown; the quantities in the examples are not defaults. Output remains the required task JSON. Relevant emoji prefixes in list and task/subtask titles are encouraged but optional, used sparingly without redecorating unrelated existing tasks.
+
+信息不足时，AI 会直接生成通用、实用的清单，不追问，也不猜测具体数量或个人情况。例如，不知道旅行天数时可以写“适量衣物”，示例数量不作为默认值；输出仍是规定的任务 JSON。鼓励在清单标题和任务／子任务文字前适当添加贴切的 emoji，但不强制、不堆砌，也不为此改动无关的已有任务。
+
 Changes apply immediately. **Ctrl+Z** (or the top Undo button on Android) undoes up to **20 workspace operations** across manual, AI, App Functions and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history** on desktop, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
 
 按 **Ctrl+Z**（Android 端可点顶部撤销按钮）可连续撤销最近 **20次清单操作**，包括手动编辑、AI、App Functions 和 CLI 修改。输入文字时优先撤销当前输入，已提交标题作为清单操作记录；切换清单不占用历史。只有保存成功的操作才记录，撤销保存失败也不会消耗记录。桌面端**成功隐藏到托盘后清空全部历史**，隐藏期间的 CLI 修改不保留撤销快照。
