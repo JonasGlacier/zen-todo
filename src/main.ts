@@ -104,8 +104,8 @@ function todoRow(todo: Todo): string {
       title="${children.length ? t("toggleSubtasks") : ""}">${todo.completed ? icon("check") : partial ? icon("hide") : ""}</button>
     <textarea class="todo-title" id="${editorId(todo.id)}" data-edit-todo="${todo.id}" aria-label="${escapeHtml(t("editTodo", { title: todo.title }))}" placeholder="${t("todoPlaceholder")}" rows="1" maxlength="200" spellcheck="false">${label}</textarea>
     ${children.length ? `<span class="task-progress" aria-label="${t("subtaskProgress", { done: children.filter((child) => child.completed).length, total: children.length })}">${children.filter((child) => child.completed).length}/${children.length}</span>` : ""}
-    <button class="row-action" data-action="add-subtask" data-id="${todo.id}" title="${t("addSubtask")}" aria-label="${escapeHtml(t("addSubtaskNamed", { title: todo.title }))}">${icon("subtask")}</button>
-    <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>
+    ${!isMobile() ? `<button class="row-action" data-action="add-subtask" data-id="${todo.id}" title="${t("addSubtask")}" aria-label="${escapeHtml(t("addSubtaskNamed", { title: todo.title }))}">${icon("subtask")}</button>
+    <button class="delete" data-action="delete-task" data-id="${todo.id}" title="${t("deleteTodo")}" aria-label="${escapeHtml(t("deleteNamedTodo", { title: todo.title }))}">${icon("close")}</button>` : ""}
   </div>`;
 }
 
