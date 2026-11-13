@@ -7,7 +7,7 @@ import {
 import type { Board, DropPlace, NoteColor, Todo, TodoList, Workspace } from "./board";
 import { getLanguage, t, watchSettings } from "./i18n";
 import { icon } from "./icons";
-import { captureEditors, restoreEditors } from "./session";
+import { captureEditors, editorsAfterSync, restoreEditors } from "./session";
 import type { UiSession } from "./session";
 import type { AgentResult, AiProposal } from "./ai";
 import { TextHistory, WorkspaceHistory } from "./history";
@@ -231,6 +231,9 @@ function reloadFromSync() {
     try {
       const stored = await invoke<Workspace | null>("load_board");
       if (!stored || !stored.lists.length) return;
+      const previous = workspace;
+      // Capture after the asynchronous load so typing during it is preserved.
+      const editors = captureEditors();
       workspace = stored;
       for (const list of workspace.lists) normalize(list.board);
       if (!workspace.lists.some((list) => !list.archived)) addList(workspace, t("myTodos"));
@@ -241,7 +244,10 @@ function reloadFromSync() {
       board = activeList().board;
       remoteVersion++;
       message = t("syncUpdatedBanner");
-      renderKeepingEditors();
+      const restoredEditors = editorsAfterSync(editors, previous, workspace);
+      render();
+      restoreEditors(restoredEditors, resizeTodo);
+      updateMobileToolbarVisibility();
     } catch (error) {
       console.error(error);
     }
