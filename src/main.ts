@@ -162,13 +162,20 @@ function render() {
   const status = pending.length ? t("taskProgress", { done: completed, total: board.todos.length }) : t(completed ? "allDone" : "takeYourTime");
   const swatches = NOTE_COLORS.map((item) => `<button class="swatch ${item === color ? "is-selected" : ""}" data-color="${item}" data-set-color="${item}" aria-pressed="${item === color}" title="${colorName(item)}" aria-label="${colorName(item)}">${item === color ? icon("check") : ""}</button>`).join("");
   const emptyDesc = isMobile() ? t("emptyDescriptionMobile") : t("emptyDescription");
+  const androidAi = platform === "android";
+  const aiPanel = aiOpen ? `<form class="ai-panel ${androidAi ? "ai-floating-input" : ""}" id="ai-panel">
+    <label class="sr-only" for="ai-prompt">${t("ai")}</label>
+    ${androidAi ? `<button type="button" class="ai-collapse" id="ai-collapse" aria-label="${t("aiCollapse")}">${icon("close")}</button>` : ""}
+    <textarea id="ai-prompt" rows="2" maxlength="2000" placeholder="${t("aiPlaceholder")}" ${aiBusy ? "readonly" : ""}>${escapeHtml(aiPrompt)}</textarea>
+    <div class="ai-controls"><span role="status">${aiBusy ? t("aiThinking") : t("aiSettingsHint")}</span><button type="${aiBusy ? "button" : "submit"}" id="ai-run">${t(aiBusy ? "cancel" : "aiRun")}</button></div>
+  </form>` : "";
   const content = showArchive ? archiveTemplate() : `<article class="note" data-color="${color}">
       <header class="note-header" data-window-drag><div class="heading"><input class="list-name" id="list-name" value="${escapeHtml(list.title)}" aria-label="${t("listName")}" title="${t("renameList")}" maxlength="80"/><span class="status">${status}</span></div>
-        <button class="icon-button ${aiOpen ? "is-active" : ""}" id="ai-button" title="${t("aiOpen")}" aria-label="${t("aiOpen")}" aria-expanded="${aiOpen}" aria-controls="ai-panel">${icon("ai")}</button>
+        ${!androidAi ? `<button class="icon-button ${aiOpen ? "is-active" : ""}" id="ai-button" title="${t("aiOpen")}" aria-label="${t("aiOpen")}" aria-expanded="${aiOpen}" aria-controls="ai-panel">${icon("ai")}</button>` : ""}
         <div class="color-picker"><button class="icon-button" id="color-button" title="${t("noteColorNamed", { color: colorName(color) })}" aria-label="${t("noteColorNamed", { color: colorName(color) })}" aria-haspopup="true" aria-expanded="false" aria-controls="palette">${icon("palette")}</button>
           <div class="palette" id="palette" role="group" aria-label="${t("noteColor")}" hidden>${swatches}</div></div>
       </header>
-      ${aiOpen ? `<form class="ai-panel" id="ai-panel"><label class="sr-only" for="ai-prompt">${t("ai")}</label><textarea id="ai-prompt" rows="2" maxlength="2000" placeholder="${t("aiPlaceholder")}" ${aiBusy ? "readonly" : ""}>${escapeHtml(aiPrompt)}</textarea><div class="ai-controls"><span>${aiBusy ? t("aiThinking") : t("aiSettingsHint")}</span><button type="${aiBusy ? "button" : "submit"}" id="ai-run">${t(aiBusy ? "cancel" : "aiRun")}</button></div></form>` : ""}
+      ${!androidAi ? aiPanel : ""}
       <div class="list" id="todo-list" role="tabpanel">${roots.length ? roots.map(nodeTemplate).join("") : `<div class="empty"><span>${icon("empty")}</span><strong>${t("emptyTitle")}</strong><p>${emptyDesc}</p></div>`}
         <button class="new-task-button" id="new-task-button">${icon("plus")} ${t("newTodo")}</button>
         <div class="list-actions"><button class="archive-list-button" data-action="archive-list" title="${t("archiveListHint")}">${icon("archive")} ${t("archiveList")}</button>
@@ -199,6 +206,7 @@ function render() {
       <button type="button" data-mobile-edit="sibling" title="${t("addSiblingTask")}" aria-label="${t("addSiblingTask")}">${icon("sibling")}</button>
       <button type="button" class="mobile-edit-danger" data-mobile-edit="delete" title="${t("deleteTodo")}" aria-label="${t("deleteTodo")}">${icon("trash")}</button>
     </div>
+    ${androidAi ? `<div class="ai-floating-dock">${aiOpen ? aiPanel : `<button type="button" class="ai-floating-button" id="ai-button" aria-label="${t("aiMobileOpen")}" aria-expanded="false">${icon("ai")}<span>${t("ai")}</span></button>`}</div>` : ""}
     <footer class="footer"><span id="workspace-status" role="status" title="${escapeHtml(message)}">${escapeHtml(message || t("footer", { count: pending.length }))}</span><span>${t("stayFocused")}</span></footer>
   </section>`;
   bindEvents();
@@ -695,6 +703,10 @@ document.addEventListener("pointerdown", (event) => {
 
 function bindEvents() {
   document.querySelector("#ai-button")?.addEventListener("click", toggleAi);
+  document.querySelector("#ai-collapse")?.addEventListener("click", () => {
+    if (aiBusy) cancelAi();
+    toggleAi();
+  });
   document.querySelector<HTMLTextAreaElement>("#ai-prompt")?.addEventListener("input", (event) => { aiPrompt = (event.target as HTMLTextAreaElement).value; });
   document.querySelector("#ai-panel")?.addEventListener("submit", (event) => { event.preventDefault(); void runAi(); });
   document.querySelector("#ai-run")?.addEventListener("click", () => { if (aiBusy) cancelAi(); });
