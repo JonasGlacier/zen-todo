@@ -5,3 +5,4 @@ src-tauri/gen/schemas/
 src-tauri/icons/*
 !src-tauri/icons/icon.svg
 *.log
+/.idea

@@ -5,9 +5,39 @@ use std::{collections::{HashMap, HashSet}, fs};
 use tauri::{AppHandle, Manager, Runtime};
 
 pub const COLORS: [&str; 6] = ["yellow", "orange", "pink", "purple", "blue", "green"];
-pub const PLANNING_GUIDANCE_EN: &str = "First write a task list. Then consider each task and, where useful, break it down into more specific subtasks. For example, 'Pack items for the trip' can contain '3 shirts', '5 pairs of underwear', 'Sunglasses', and 'Toothbrush'. Keep the main task as the parent and put the detailed items in its children array. Subtasks are parts of a task, not chronological dependencies. Keep simple tasks as leaves; do not force a breakdown. The example quantities are illustrative, not defaults. When information is missing, produce a practical, general-purpose checklist without asking follow-up questions or guessing quantities or personal circumstances; use wording such as 'Enough clothes for the trip' instead. Always return the required task JSON. Where appropriate, consider prefixing list titles and task or subtask titles with a relevant emoji, for example '🧳 Travel' or '🪥 Toothbrush'. Emoji are encouraged but optional: use them sparingly, keep the text readable, respect the user's preferences, and do not change unrelated existing titles just to add emoji.";
+pub const PLANNING_GUIDANCE_EN: &str = r#"First write a task list, then recursively consider EVERY task and subtask for useful breakdown. A subtask can have its own children, and those children can also have children: the hierarchy is not limited to two levels. Keep a task as the parent and put its more specific parts in its children array. Subtasks are parts of a task, not chronological dependencies.
+For example, a useful THREE-LEVEL checklist is:
+- Pack for the trip
+  - Clothes
+    - Shirts
+    - Underwear
+    - Socks
+  - Medicines and first-aid items
+    - Personal regular medicines, if any
+    - Adhesive bandages
+  - Documents
+    - ID card
+    - Tickets or booking confirmations
+Here Clothes, Medicines and first-aid items, and Documents are category subtasks, not finished leaf items. Their children are the concrete items to check off. Three or more levels are appropriate when the content benefits from them; branches can have different depths.
+When the user asks for 'more detailed', 'more specific', or similar refinement, inspect the EXISTING leaves at every depth. Expand relevant broad categories or compound tasks into concrete child items under the SAME existing task ID, preserving their existing ancestors. Do not merely rename categories, lengthen their descriptions, or append more siblings. Before returning, check whether any relevant leaf is still only a broad category that can usefully be expanded. Stop when leaves are specific, directly checkable items or actions; do not force extra levels onto simple items.
+When information is missing, produce a practical, general-purpose checklist without asking follow-up questions or guessing quantities or personal circumstances. List specific item types without assumed counts, for example Shirts and Underwear rather than stopping at 'Enough clothes'. Only use quantities when supported by the user's context. Always return the required task JSON. Where appropriate, consider prefixing list titles and task or subtask titles with a relevant emoji, for example '🧳 Travel' or '🪥 Toothbrush'. Emoji are encouraged but optional: use them sparingly, keep the text readable, respect the user's preferences, and do not change unrelated existing titles just to add emoji."#;
 #[allow(dead_code)]
-pub const PLANNING_GUIDANCE_ZH: &str = "先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，把“整理旅行需要携带的物品”进一步拆分为“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。保留原任务作为父任务，将详细条目放入它的 children 数组。子任务表示任务包含的内容，不表示执行先后。简单任务不必强行拆分，示例数量不是默认值。信息不足时，先生成通用、实用的清单，不向用户追问，不猜测具体数量或个人情况；可以使用“适量衣物”等不依赖缺失信息的表述。始终返回规定的任务 JSON。鼓励在清单标题、任务或子任务文字前适当添加贴切的 emoji，例如“🧳 旅行准备”“🪥 牙刷”，但这不是强制要求：适量使用、保持文字清晰，尊重用户偏好，不要仅为添加 emoji 改动无关的已有标题。";
+pub const PLANNING_GUIDANCE_ZH: &str = r#"先写一份任务清单，再递归检查每一条任务和子任务是否可以进一步细化。子任务可以有自己的 children，其中的子任务还可以继续有 children，层级不限制为两层。保留原任务作为父任务，将更具体的内容放入它的 children 数组。子任务表示任务包含的内容，不表示执行先后。
+例如，一份有用的三层清单是：
+- 打包行李
+  - 衣服
+    - 衬衫
+    - 内裤
+    - 袜子
+  - 常备药及急救用品
+    - 本人日常使用的药品（如有）
+    - 创可贴
+  - 证件
+    - 身份证
+    - 车票或预订凭证
+这里“衣服”“常备药及急救用品”“证件”是分类子任务，不应直接当成已经足够具体的叶子项；它们下面的条目才是可逐项勾选的具体内容。有需要时可以使用三层或更多层，各分支的深度可以不同。
+用户要求“更详细”“更具体”“细化”等修改时，检查现有清单每一层的叶子项，把相关的宽泛分类或复合任务继续拆成具体子任务，保留被拆分任务的原 ID 和已有祖先层级。不要仅改写分类名称、加长描述或增加同级项。返回前检查相关叶子项中是否仍有可以有用地继续展开的宽泛分类。叶子项应尽量是具体、可直接勾选的物品或动作；已经具体的条目不必强行增加层级。
+信息不足时直接生成通用、实用的清单，不向用户追问，不猜测具体数量或个人情况。可以列出不带假定数量的具体物品种类，如“衬衫”“内裤”，不要只停留在“适量衣物”；只有用户上下文支持时才写数量。始终返回规定的任务 JSON。鼓励在清单标题、任务或子任务文字前适当添加贴切的 emoji，例如“🧳 旅行准备”“🪥 牙刷”，但这不是强制要求：适量使用、保持文字清晰，尊重用户偏好，不要仅为添加 emoji 改动无关的已有标题。"#;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

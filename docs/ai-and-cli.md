@@ -13,9 +13,13 @@ OneByOne is a **todo list with nested subtasks**. Parents appear above their chi
 
 OneByOne 是一个**可以嵌套子任务的待办清单**。AI 指示为：先写一份任务清单，再尝试给每一条任务（如果可以的话）拆分出更详细的子任务。例如，“整理旅行需要携带的物品”可以包含“衬衫3件”“内裤5件”“太阳镜”“牙刷”等。它们是父任务包含的内容，不是执行先后关系。
 
-When details are missing, AI produces a practical, general-purpose checklist rather than asking follow-up questions or guessing quantities or personal circumstances. For example, use “Enough clothes for the trip” when the trip length is unknown; the quantities in the examples are not defaults. Output remains the required task JSON. Relevant emoji prefixes in list and task/subtask titles are encouraged but optional, used sparingly without redecorating unrelated existing tasks.
+Subtasks can themselves have subtasks, recursively; there is no two-level limit. For example: **Pack for the trip → Clothes → Shirts / Underwear / Socks**, with parallel branches **Medicines and first-aid items → Personal regular medicines (if any) / Adhesive bandages** and **Documents → ID card / Tickets or booking confirmations**. A request for “more detail” tells AI to inspect existing leaves at every depth and expand relevant categories into directly checkable items, preserving their original IDs and parent links. Different branches may have different depths; concrete items do not need forced extra levels.
 
-信息不足时，AI 会直接生成通用、实用的清单，不追问，也不猜测具体数量或个人情况。例如，不知道旅行天数时可以写“适量衣物”，示例数量不作为默认值；输出仍是规定的任务 JSON。鼓励在清单标题和任务／子任务文字前适当添加贴切的 emoji，但不强制、不堆砌，也不为此改动无关的已有任务。
+子任务可以继续嵌套子任务，不限制为两层。例如：**打包行李 → 衣服 → 衬衫／内裤／袜子**，同时还有 **常备药及急救用品 → 本人日常使用的药品（如有）／创可贴**、**证件 → 身份证／车票或预订凭证** 等分支。要求“更详细、更具体”时，AI 应检查现有每一层的叶子项，在保留原 ID 和父子关系的基础上，将相关分类继续拆成可直接勾选的具体条目，而非只改写名称或增加同级项。各分支深度可以不同，具体条目不必强行增加层级。
+
+When details are missing, AI produces a practical, general-purpose checklist rather than asking follow-up questions or guessing quantities or personal circumstances. It can list specific item types such as Shirts and Underwear without assuming counts, instead of stopping at “Enough clothes”. Quantities in examples are not defaults. Output remains the required task JSON. Relevant emoji prefixes in list and task/subtask titles are encouraged but optional, used sparingly without redecorating unrelated existing tasks.
+
+信息不足时，AI 会直接生成通用、实用的清单，不追问，也不猜测具体数量或个人情况。可以列出“衬衫”“内裤”等不带假定数量的具体物品种类，不必停留在“适量衣物”；示例数量不作为默认值。输出仍是规定的任务 JSON。鼓励在清单标题和任务／子任务文字前适当添加贴切的 emoji，但不强制、不堆砌，也不为此改动无关的已有任务。
 
 Changes apply immediately. **Ctrl+Z** (or the top Undo button on Android) undoes up to **20 workspace operations** across manual, AI, App Functions and CLI edits. A parent/child completion cascade or a whole AI update counts as one operation. Current text edits undo locally first; committed titles are workspace operations. Navigation does not record or invalidate history. Only successful saves enter history, and a failed undo can be retried. **Successfully hiding to the tray clears all history** on desktop, regardless of encryption; hidden-mode CLI edits do not retain snapshots. Invalid JSON, duplicate IDs, unknown parents and cyclic nesting are rejected without changing the saved list. Results based on an outdated workspace are rejected too.
 
