@@ -183,7 +183,9 @@ input::placeholder, textarea::placeholder { color: var(--text-3); }
 .ai-island button:focus-visible { outline-color: var(--island-muted); outline-offset: -4px; }
 [data-platform="android"] .list { padding-bottom: 96px; }
 [data-platform="android"].ai-island-open .list { padding-bottom: 260px; }
-body:has(#mobile-edit-bar:not([hidden])) .ai-island:not(.is-open) { bottom: calc(88px + env(safe-area-inset-bottom, 0px) + var(--keyboard-inset, 0px)); }
+/* Keep task editing free of the AI entry, including while the IME animates. */
+body:has([data-edit-todo]:focus, #list-name:focus) .ai-island:not(.is-open),
+body:has(#mobile-edit-bar:not([hidden])) .ai-island:not(.is-open) { visibility: hidden; pointer-events: none; }
 .error { justify-content: center; align-items: center; }
 .error p { color: var(--text-2); font-size: 12px; }
 .unlock { justify-content: center; align-items: center; }
