@@ -54,13 +54,29 @@ const colorName = (color: NoteColor) => t(`color_${color}`);
 const titleOf = (input: HTMLTextAreaElement) => input.value.replace(/[\r\n]+/g, " ").trim();
 
 async function persist(recordHistory = false) {
-  if (isTauri()) await invoke("save_board", { board: workspace, recordHistory });
+  if (isTauri()) {
+    const before = workspace;
+    const saved = await invoke<Workspace>("save_board", { board: workspace, base: savedWorkspace, recordHistory });
+    // A stale-base save can also return unrelated remote edits. Refresh those
+    // editors now, before a later sync event can mistake their old text for drafts.
+    const editors = initialized && JSON.stringify(before.lists) !== JSON.stringify(saved.lists) ? captureEditors() : null;
+    workspace = saved;
+    savedWorkspace = structuredClone(workspace);
+    board = activeList().board;
+    if (editors) {
+      render();
+      restoreEditors(editorsAfterSync(editors, before, workspace), resizeTodo);
+      updateMobileToolbarVisibility();
+    }
+  }
   else {
     const previous = recordHistory ? JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null : null;
     localStorage.setItem(browserKey, JSON.stringify(workspace));
     if (previous) browserHistory.record(previous, workspace);
   }
 }
+
+let savedWorkspace: Workspace | null = null;
 
 // Queue edits and clicks so a slow disk save never discards the next action.
 function change(mutate: () => void, focus?: string, renderAfter = true): Promise<void> {
@@ -75,7 +91,7 @@ function change(mutate: () => void, focus?: string, renderAfter = true): Promise
       saveFailures++;
       workspace = previous;
       board = activeList().board;
-      message = t("saveFailed");
+      message = t(String(error).includes("Conflict:") ? "editConflict" : "saveFailed");
       console.error(error);
     } finally {
       if (renderAfter) render();
@@ -289,6 +305,7 @@ function reloadFromSync() {
       // Capture after the asynchronous load so typing during it is preserved.
       const editors = captureEditors();
       workspace = stored;
+      savedWorkspace = structuredClone(stored);
       for (const list of workspace.lists) normalize(list.board);
       if (!workspace.lists.some((list) => !list.archived)) addList(workspace, t("myTodos"));
       ensureColors(workspace);
@@ -335,6 +352,7 @@ function remoteOperation(command: string, args: Record<string, unknown>, success
         result = { command: "undo", workspace: target, revision: "", ...browserHistory.status(target) };
       } else result = await invoke<AgentResult>(command, args);
       workspace = result.workspace;
+      savedWorkspace = structuredClone(workspace);
       board = activeList().board;
       if (result.command !== "list") showArchive = false;
       if (result.command !== "list") remoteVersion++;
@@ -343,7 +361,7 @@ function remoteOperation(command: string, args: Record<string, unknown>, success
       succeeded = true;
     } catch (error) {
       message = String(error).includes("Nothing to undo") ? t("nothingToUndo")
-        : String(error).includes("Conflict:") ? t("aiConflict") : t(undoRequested ? "undoFailed" : "aiFailed", { error: String(error) });
+        : String(error).includes("Conflict:") ? t(undoRequested ? "undoConflict" : "aiConflict") : t(undoRequested ? "undoFailed" : "aiFailed", { error: String(error) });
     }
     remoteCount--;
     if (!suspending) {
@@ -1009,6 +1027,7 @@ async function start() {
   const stored = isTauri() ? await invoke<Workspace | null>("load_board") : JSON.parse(localStorage.getItem(browserKey) ?? "null") as Workspace | null;
   const session = isTauri() && !isMobile() ? await invoke<UiSession | null>("load_session") : null;
   workspace = stored ?? createWorkspace(t("myTodos"));
+  savedWorkspace = stored ? structuredClone(stored) : null;
   if (!workspace.lists.length) throw new Error("Invalid workspace");
   let normalized = false;
   for (const list of workspace.lists) normalized = normalize(list.board) || normalized;

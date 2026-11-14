@@ -179,7 +179,7 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
     let path = crate::data_file(app)?;
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let encrypted = vault::is_encrypted(&bytes)?;
-    let plaintext = if encrypted { vault::open(vault_state.key.as_ref().ok_or("Vault is locked")?, &bytes)? } else { bytes };
+    let plaintext = if encrypted { vault::open(vault_state.key.as_ref().ok_or("Vault is locked")?, &bytes)? } else { bytes.clone() };
     let mut workspace: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
     workspace.normalize();
     let runtime = app.state::<crate::history::HistoryRuntime>();
@@ -191,11 +191,10 @@ pub fn execute<R: Runtime>(app: &AppHandle<R>, request: Request) -> Result<serde
     }
     let previous = workspace.clone();
     workspace = prepare(&workspace, &request, &history)?;
-    if request.command != "undo" {
-        crate::sync_merge::stamp_changes(Some(&previous), &mut workspace, crate::sync_merge::now_ms());
-    }
+    workspace = crate::causal::commit(&previous, &workspace, &previous, &crate::causal::device_id(&path)?)?;
     let data = serde_json::to_vec(&workspace).map_err(|e| e.to_string())?;
     let data = if encrypted { vault::seal(vault_state.key.as_ref().ok_or("Vault is locked")?, &data)? } else { data };
+    crate::causal::backup_legacy(&path, &bytes, &previous)?;
     vault::atomic_write(&path, &data)?;
     if request.command == "undo" { history.did_undo(&workspace); }
     else if crate::with_ui(app, |ui| ui.phase == crate::UiPhase::Visible && ui.ready)? { history.record(&previous, &workspace); }
@@ -228,6 +227,7 @@ pub fn execute_on_file(path: &std::path::Path, request: Request) -> Result<serde
     } else {
         let id = uuid::Uuid::new_v4().to_string();
         Workspace {
+            causal: Default::default(),
             lists: vec![TodoList {
                 id: id.clone(),
                 title: "My todos".into(),
@@ -274,11 +274,10 @@ pub fn execute_on_file(path: &std::path::Path, request: Request) -> Result<serde
     let previous = workspace.clone();
     let empty_history = crate::history::History::default();
     workspace = prepare(&workspace, &request, &empty_history)?;
-    crate::sync_merge::stamp_changes(Some(&previous), &mut workspace, crate::sync_merge::now_ms());
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    workspace = crate::causal::commit(&previous, &workspace, &previous, &crate::causal::device_id(path)?)?;
     let data = serde_json::to_vec(&workspace).map_err(|e| e.to_string())?;
+    if path.exists() { crate::causal::backup_legacy(path, &fs::read(path).map_err(|e| e.to_string())?, &previous)?; }
     vault::atomic_write(path, &data)?;
     Ok(serde_json::json!({
         "command": request.command,
@@ -368,16 +367,21 @@ mod tests {
     }
 
     #[test]
-    fn undo_restores_exact_snapshot_but_never_discards_subsequent_edits() {
+    fn undo_restores_affected_content_without_discarding_unrelated_remote_edits() {
         let before = fixture();
         let mut after = before.clone();
         apply(&mut after, &action(json!({"mode":"create","title":"New","todos":[]}))).unwrap();
+        let after = crate::causal::commit(&before, &after, &before, "pc").unwrap();
         let mut history = crate::history::History::default();
         history.record(&before, &after);
         let request = Request { command: "undo".into(), revision: None, action: None };
-        assert_eq!(prepare(&after, &request, &history).unwrap(), before);
-        after.lists[0].title = "Later edit".into();
-        assert!(prepare(&after, &request, &history).is_err());
+        assert_eq!(crate::causal::fields(&prepare(&after, &request, &history).unwrap()), crate::causal::fields(&before));
+        let mut edited = after.clone();
+        edited.lists[0].title = "Later edit".into();
+        let edited = crate::causal::commit(&after, &edited, &after, "phone").unwrap();
+        let undone = prepare(&edited, &request, &history).unwrap();
+        assert_eq!(undone.lists.len(), 1);
+        assert_eq!(undone.lists[0].title, "Later edit");
         assert!(prepare(&before, &request, &crate::history::History::default()).is_err());
     }
 

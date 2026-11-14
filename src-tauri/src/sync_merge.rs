@@ -19,6 +19,7 @@ pub fn sync_revision(workspace: &Workspace) -> String {
         "lists": &workspace.lists,
         "deletedLists": &workspace.deleted_lists,
         "deletedTodos": &workspace.deleted_todos,
+        "causal": &workspace.causal,
     });
     hex::encode(Sha256::digest(serde_json::to_vec(&payload).unwrap_or_default()))
 }
@@ -124,7 +125,8 @@ pub fn stamp_changes(previous: Option<&Workspace>, current: &mut Workspace, now:
 }
 
 fn is_untouched_placeholder(ws: &Workspace) -> bool {
-    ws.deleted_lists.is_empty()
+    !crate::causal::has_retained_data(ws)
+        && ws.deleted_lists.is_empty()
         && ws.deleted_todos.is_empty()
         && ws.lists.len() == 1
         && !ws.lists[0].archived
@@ -133,7 +135,8 @@ fn is_untouched_placeholder(ws: &Workspace) -> bool {
 }
 
 fn has_meaningful_data(ws: &Workspace) -> bool {
-    !ws.deleted_lists.is_empty()
+    crate::causal::has_retained_data(ws)
+        || !ws.deleted_lists.is_empty()
         || !ws.deleted_todos.is_empty()
         || ws.lists.len() > 1
         || ws.lists.iter().any(|l| {
@@ -288,15 +291,25 @@ pub fn merge_workspaces(local: &Workspace, remote: &Workspace) -> Workspace {
     // Handle fresh-install placeholder adoption cleanly.
     if is_untouched_placeholder(local) && has_meaningful_data(remote) {
         let mut adopted = remote.clone();
+        crate::causal::observe_clock(&mut adopted, local);
         adopted.normalize();
         ensure_open_list(&mut adopted, &remote.active_list_id);
         return adopted;
     }
     if is_untouched_placeholder(remote) && has_meaningful_data(local) {
         let mut kept = local.clone();
+        crate::causal::observe_clock(&mut kept, remote);
         kept.normalize();
         ensure_open_list(&mut kept, &local.active_list_id);
         return kept;
+    }
+
+    if !local.causal.is_empty() || !remote.causal.is_empty() {
+        let mut local = local.clone();
+        let mut remote = remote.clone();
+        crate::causal::initialize(&mut local);
+        crate::causal::initialize(&mut remote);
+        return crate::causal::materialize(crate::causal::merge(&local.causal, &remote.causal), &local.active_list_id);
     }
 
     let mut deleted_lists = local.deleted_lists.clone();
@@ -396,6 +409,7 @@ pub fn merge_workspaces(local: &Workspace, remote: &Workspace) -> Workspace {
     }
 
     let mut result = Workspace {
+        causal: Default::default(),
         lists: merged_lists,
         active_list_id: local.active_list_id.clone(),
         deleted_todos,
@@ -405,7 +419,7 @@ pub fn merge_workspaces(local: &Workspace, remote: &Workspace) -> Workspace {
     result
 }
 
-fn ensure_open_list(workspace: &mut Workspace, preferred_active_id: &str) {
+pub(crate) fn ensure_open_list(workspace: &mut Workspace, preferred_active_id: &str) {
     if workspace.lists.is_empty() {
         let id = "default-list".to_string();
         workspace.lists.push(TodoList {

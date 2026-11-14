@@ -18,6 +18,8 @@ export type NoteColor = typeof NOTE_COLORS[number];
 
 export type TodoList = { id: string; title: string; board: Board; archived?: boolean; color?: NoteColor; updatedAt?: number; order?: number };
 export type Workspace = {
+  // Opaque backend-owned causal registers; preserve them in save bases.
+  causal?: { clock: Record<string, number>; fields: Record<string, unknown> };
   lists: TodoList[];
   activeListId: string;
   deletedTodos?: Record<string, number>;

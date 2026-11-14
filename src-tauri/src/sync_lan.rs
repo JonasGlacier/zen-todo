@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 const DISCOVERY_PORT: u16 = 42099;
 const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(239, 255, 42, 99);
-const PROTO_VERSION: &str = "onebyone-lan-v1";
+const PROTO_VERSION: &str = "onebyone-lan-v2";
 const PAIR_TTL_MS: i64 = 120_000;
 const MAX_PAIR_ATTEMPTS: u8 = 5;
 const PEER_STALE_MS: i64 = 25_000;
@@ -141,7 +141,10 @@ enum WireRequest {
         salt: String,
         nonce_b: String,
     },
+    #[serde(rename = "sync_v2_req")]
     SyncReq {
+        #[serde(default)]
+        protocol: u32,
         device_id: String,
         nonce: String,
         ciphertext: String,
@@ -304,6 +307,7 @@ fn current_local_workspace<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Work
     };
     let mut ws: Workspace = serde_json::from_slice(&plaintext).map_err(|e| e.to_string())?;
     ws.normalize();
+    crate::causal::initialize(&mut ws);
     Ok(Some(ws))
 }
 
@@ -330,10 +334,15 @@ fn apply_merged_workspace<R: Runtime>(app: &AppHandle<R>, remote: &Workspace) ->
     };
 
     let merged = match &local_opt {
-        Some(local) => sync_merge::merge_workspaces(local, remote),
+        Some(local) => {
+            let mut local = local.clone();
+            crate::causal::initialize(&mut local);
+            sync_merge::merge_workspaces(&local, remote)
+        }
         None => {
             let mut adopted = remote.clone();
             adopted.normalize();
+            crate::causal::initialize(&mut adopted);
             adopted
         }
     };
@@ -350,13 +359,10 @@ fn apply_merged_workspace<R: Runtime>(app: &AppHandle<R>, remote: &Workspace) ->
         } else {
             serialized
         };
-        let history_rt = app.state::<crate::history::HistoryRuntime>();
-        let mut history = history_rt.0.lock().map_err(|e| e.to_string())?;
-        vault::atomic_write(&path, &out)?;
-        if let Some(prev) = &local_opt {
-            history.record(prev, &merged);
+        if let Some(previous) = &local_opt {
+            crate::causal::backup_legacy(&path, &fs::read(&path).map_err(|e| e.to_string())?, previous)?;
         }
-        drop(history);
+        vault::atomic_write(&path, &out)?;
         drop(vault_guard);
         let _ = app.emit("sync-updated", ());
     }
@@ -467,10 +473,16 @@ fn handle_tcp_stream(
             Ok(())
         }
         WireRequest::SyncReq {
+            protocol,
             device_id,
             nonce,
             ciphertext,
         } => {
+            if protocol != 2 {
+                let reply = SyncReply { ok: false, error: Some("Sync protocol changed; update both devices".into()), nonce: None, ciphertext: None };
+                writeln!(reader.get_mut(), "{}", serde_json::to_string(&reply).unwrap()).map_err(|e| e.to_string())?;
+                return Err("Incompatible sync protocol".into());
+            }
             let Some(shared_key) = lookup_peer_key(&device_id) else {
                 let reply = SyncReply {
                     ok: false,
@@ -496,6 +508,10 @@ fn handle_tcp_stream(
             };
             let remote_ws: Workspace =
                 serde_json::from_slice(&plain).map_err(|e| format!("Invalid workspace JSON: {e}"))?;
+            crate::causal::validate(&remote_ws)?;
+            if !remote_ws.lists.is_empty() && remote_ws.causal.is_empty() {
+                return Err("Peer sent legacy state on the v2 protocol".into());
+            }
             match merge_callback(&device_id, remote_ws) {
                 Ok(merged) => {
                     let (resp_nonce, resp_ct) =
@@ -639,6 +655,7 @@ fn client_sync_exchange(
     let (nonce, ciphertext) =
         aead_encrypt(shared_key, &serde_json::to_vec(local_ws).map_err(|e| e.to_string())?)?;
     let req = WireRequest::SyncReq {
+        protocol: 2,
         device_id: my_device_id.to_string(),
         nonce,
         ciphertext,
@@ -656,7 +673,12 @@ fn client_sync_exchange(
         reply.nonce.as_deref().unwrap_or(""),
         reply.ciphertext.as_deref().unwrap_or(""),
     )?;
-    serde_json::from_slice(&plain).map_err(|e| format!("Invalid merged workspace: {e}"))
+    let workspace: Workspace = serde_json::from_slice(&plain).map_err(|e| format!("Invalid merged workspace: {e}"))?;
+    crate::causal::validate(&workspace)?;
+    if !workspace.lists.is_empty() && workspace.causal.is_empty() {
+        return Err("Peer sent legacy state on the v2 protocol".into());
+    }
+    Ok(workspace)
 }
 
 fn bind_discovery_socket() -> Result<UdpSocket, String> {
@@ -951,6 +973,7 @@ fn sync_single_peer<R: Runtime>(
     let local_ws = current_local_workspace(app)?
         .unwrap_or_else(|| Workspace {
             lists: Vec::new(),
+            causal: Default::default(),
             active_list_id: String::new(),
             deleted_todos: Default::default(),
             deleted_lists: Default::default(),
@@ -1199,6 +1222,7 @@ mod tests {
             }))
             .unwrap();
             sync_merge::stamp_changes(None, &mut ws, 1000);
+            crate::causal::initialize(&mut ws);
             ws
         }));
         let paired_on_desktop: Arc<Mutex<Option<TrustedPeer>>> = Arc::new(Mutex::new(None));
@@ -1289,6 +1313,7 @@ mod tests {
         }))
         .unwrap();
         sync_merge::stamp_changes(None, &mut mobile_ws, 2000);
+        crate::causal::initialize(&mut mobile_ws);
 
         let mobile_key = decode_key32(&peer_on_mobile.shared_key_hex).unwrap();
         let merged_reply = client_sync_exchange(addr, "dev-android", &mobile_key, &mobile_ws).unwrap();

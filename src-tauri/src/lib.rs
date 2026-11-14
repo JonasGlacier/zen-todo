@@ -13,6 +13,7 @@ mod agent;
 mod ai;
 pub mod app_functions;
 mod history;
+mod causal;
 pub mod sync_lan;
 pub mod sync_merge;
 mod vault;
@@ -218,6 +219,8 @@ pub struct TodoList {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Workspace {
+    #[serde(default, skip_serializing_if = "causal::State::is_empty")]
+    pub causal: causal::State,
     pub lists: Vec<TodoList>,
     pub active_list_id: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -267,6 +270,7 @@ fn load_board<R: Runtime>(app: AppHandle<R>) -> Result<Option<Workspace>, String
     };
     let mut workspace: Workspace = serde_json::from_slice(&contents).map_err(|error| error.to_string())?;
     workspace.normalize();
+    causal::initialize(&mut workspace);
     Ok(Some(workspace))
 }
 
@@ -275,8 +279,9 @@ fn save_board<R: Runtime>(
     app: AppHandle<R>,
     mut board: Workspace,
     record_history: Option<bool>,
-) -> Result<history::Status, String> {
-    let status = {
+    base: Option<Workspace>,
+) -> Result<Workspace, String> {
+    let saved = {
         let state = app.state::<VaultRuntime>();
         let vault = state.0.lock().map_err(|e| e.to_string())?;
         let path = data_file(&app)?;
@@ -304,7 +309,10 @@ fn save_board<R: Runtime>(
             })
             .transpose()?;
         board.normalize();
-        sync_merge::stamp_changes(previous.as_ref(), &mut board, sync_merge::now_ms());
+        let empty = Workspace { lists: vec![], active_list_id: String::new(), deleted_lists: Default::default(), deleted_todos: Default::default(), causal: Default::default() };
+        let latest = previous.as_ref().unwrap_or(&empty);
+        let base = base.as_ref().unwrap_or(&empty);
+        board = causal::commit(base, &board, latest, &causal::device_id(&path)?)?;
         let contents = serde_json::to_vec(&board).map_err(|error| error.to_string())?;
         let contents = if encrypted || vault.key.is_some() {
             vault::seal(vault.key.as_ref().ok_or("Vault locked")?, &contents)?
@@ -313,16 +321,19 @@ fn save_board<R: Runtime>(
         };
         let runtime = app.state::<history::HistoryRuntime>();
         let mut history = runtime.0.lock().map_err(|e| e.to_string())?;
+        if let (Some(bytes), Some(previous)) = (existing.as_ref(), previous.as_ref()) {
+            causal::backup_legacy(&path, bytes, previous)?;
+        }
         vault::atomic_write(&path, &contents)?;
         if record_history.unwrap_or(false) {
             if let Some(previous) = previous {
                 history.record(&previous, &board);
             }
         }
-        history.status(&board)
+        board
     };
     sync_lan::notify_local_change(&app);
-    Ok(status)
+    Ok(saved)
 }
 
 fn lock_on_hide(path: &std::path::Path) -> Result<bool, String> {
